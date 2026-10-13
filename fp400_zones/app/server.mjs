@@ -336,12 +336,17 @@ function onMessage(topic, buf) {
         return changed();
     }
     if (topic === `${BASE}/bridge/converters`) {
-        S.converters = Array.isArray(msg) ? msg : [];
+        S.converters = Array.isArray(msg) ? msg.filter((c) => c && typeof c.name === 'string') : [];
         return changed();
     }
     if (topic === `${BASE}/bridge/devices`) {
         const list = Array.isArray(msg) ? msg : [];
-        S.devices = list.filter((d) => d.model_id === MODEL_ID || d.definition?.model === OUR_MODEL);
+        S.devices = list.filter((d) => d && typeof d.ieee_address === 'string' && typeof d.friendly_name === 'string'
+            && (d.model_id === MODEL_ID || d.definition?.model === OUR_MODEL));
+        const activeDevices = new Set(S.devices.map((d) => d.ieee_address));
+        for (const cache of [S.states, S.lastTargets]) {
+            for (const ieee of cache.keys()) if (!activeDevices.has(ieee)) cache.delete(ieee);
+        }
         const names = new Set(S.devices.map((d) => d.friendly_name));
         for (const name of devicesSubscribed) if (!names.has(name)) client.unsubscribe(`${BASE}/${name}`);
         for (const name of names) if (!devicesSubscribed.has(name)) client.subscribe(`${BASE}/${name}`);
@@ -536,7 +541,8 @@ const server = http.createServer((req, res) => {
         res.writeHead(403).end('Forbidden');
         return;
     }
-    const url = new URL(req.url, 'http://x');
+    let url;
+    try { url = new URL(req.url, 'http://x'); } catch { res.writeHead(400).end('Bad request'); return; }
     if (url.pathname === '/health') {
         res.writeHead(200, {'content-type': 'application/json'}).end(JSON.stringify({mqtt: S.mqtt.status, z2m: S.bridge.state}));
         return;
@@ -545,7 +551,7 @@ const server = http.createServer((req, res) => {
         res.writeHead(200, {'content-type': 'text/javascript; charset=utf-8', 'content-disposition': `attachment; filename="${CONVERTER_NAME}"`}).end(CONVERTER_CODE);
         return;
     }
-    const entry = STATIC[url.pathname];
+    const entry = Object.hasOwn(STATIC, url.pathname) ? STATIC[url.pathname] : null;
     if (!entry) {
         res.writeHead(404).end('Not found');
         return;
@@ -562,7 +568,8 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({noServer: true, maxPayload: 64 * 1024});
 server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url, 'http://x');
+    let url;
+    try { url = new URL(req.url, 'http://x'); } catch { socket.destroy(); return; }
     if (!allowed(req) || (!ADDON && !sameOrigin(req)) || url.pathname !== '/ws') {
         socket.destroy();
         return;

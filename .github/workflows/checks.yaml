@@ -1,0 +1,52 @@
+name: Checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: fp400_zones/app/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: fp400_zones/app
+      - run: npm run check
+        working-directory: fp400_zones/app
+      - run: npm audit --omit=dev --audit-level=moderate
+        working-directory: fp400_zones/app
+  addon-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: frenck/action-addon-linter@v2.21
+        with:
+          path: ./fp400_zones
+  container:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Read app version
+        id: version
+        run: |
+          version=$(node -p "require('./fp400_zones/app/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./fp400_zones
+          platforms: ${{ matrix.platform }}
+          push: false
+          build-args: BUILD_VERSION=${{ steps.version.outputs.version }}
