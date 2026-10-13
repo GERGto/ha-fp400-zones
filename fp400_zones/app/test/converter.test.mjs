@@ -10,9 +10,9 @@ function load() {
     const code = fs.readFileSync(new URL('../converter/aqara-fp400-zones.mjs', import.meta.url), 'utf8')
         .replace(/^import .*;$/gm, '')
         .replace('export default {', 'const definition = {');
-    const context = vm.createContext({Buffer, setTimeout, clearTimeout,
+    const context = vm.createContext({Buffer, setTimeout: (fn) => setTimeout(fn, 0), clearTimeout,
         m: builder, exposes: {presets: builder, access: {STATE: 1, SET: 2, ALL: 7}}});
-    vm.runInContext(`${code}\nglobalThis.helpers = {parseLayout, parseLocation, cellOf, evaluateZones, clearZones, rt, tzFp400, fzOccupancy};`, context);
+    vm.runInContext(`${code}\nglobalThis.helpers = {parseLayout, parseLocation, cellOf, rt, tzFp400, fzOccupancy, fp400Extend, ATTR};`, context);
     return context.helpers;
 }
 
@@ -23,7 +23,7 @@ test('malformed layouts cannot crash the converter', () => {
     }
 });
 
-test('view subscriptions use a bounded expiry and native reports do not overwrite software zones', async () => {
+test('view subscriptions expire and occupancy always comes from the sensor', async () => {
     const {tzFp400, fzOccupancy} = load();
     const commands = [];
     const device = {ieeeAddr: 'example-device', getEndpoint: () => ({command: async (...args) => commands.push(args)})};
@@ -31,7 +31,7 @@ test('view subscriptions use a bounded expiry and native reports do not overwrit
     assert.equal(commands[0][2].timeout, 60);
     for (const value of [0, -1, 3601, 'bad']) await assert.rejects(tzFp400.convertSet(null, 'location_subscribe', value, {device}));
     const msg = {data: {occupancy: 1}, endpoint: {ID: 3}, device};
-    assert.equal(fzOccupancy.convert(null, msg, () => {}, {}).zone_1, undefined);
+    assert.equal(fzOccupancy.convert(null, msg, () => {}, {}).zone_1, true);
     assert.equal(fzOccupancy.convert(null, msg, () => {}, {fp400_zone_mode: 'native'}).zone_1, true);
     msg.data.occupancy = 0;
     assert.equal(fzOccupancy.convert(null, msg, () => {}, {fp400_zone_mode: 'native'}).zone_1, false);
@@ -46,16 +46,34 @@ test('grid boundaries and truncated location reports are handled', () => {
     assert.equal(parseLocation(frame).truncated, true);
 });
 
-test('leaving a zone honors its delay; clearing occupancy cancels pending timers', async () => {
-    const {parseLayout, evaluateZones, clearZones, rt} = load();
-    const layout = parseLayout({zones: [{id: 1, cells: '80' + '00'.repeat(39), delay: 0.02}]});
-    const r = rt({ieeeAddr: 'example-device'});
-    assert.equal(evaluateZones(r, layout, [{cell: {bit: 0}}]).zone_1, true);
-    const published = new Promise((resolve) => { r.publish = resolve; });
-    assert.equal(Object.keys(evaluateZones(r, layout, [])).length, 0);
-    assert.equal((await published).zone_1, false);
-    evaluateZones(r, layout, [{cell: {bit: 0}}]);
-    evaluateZones(r, layout, []);
-    assert.equal(clearZones(r).zone_1, false);
-    assert.equal(r.timers[1], null);
+
+test('saving confirms all masks and correlates sensor failure without claiming success', async () => {
+    const {tzFp400, ATTR} = load();
+    const written = new Map();
+    let fail = false;
+    const ep = {command: async () => {}, write: async (cluster, attrs) => {
+        if (fail) throw new Error('Sensor rejected mask');
+        for (const [id, item] of Object.entries(attrs)) written.set(Number(id), item.value);
+    }, read: async (cluster, names) => names[0] === 'zones' ? {zones: []} : {[names[0]]: written.get(ATTR[names[0]])}};
+    const meta = {device: {getEndpoint: () => ep}};
+    const value = {request: 'new-request', layout: {zones: [], regions: {monitoring: '80' + '00'.repeat(39)}}};
+    const success = (await tzFp400.convertSet(null, 'sensor_layout', value, meta)).state;
+    assert.equal(success.layout_status, 'verified');
+    assert.equal(success.layout_request, value.request);
+    assert.equal(written.size, 3);
+    assert.equal(written.get(ATTR.edgeRegion).toString('hex'), value.layout.regions.monitoring);
+    fail = true;
+    const failure = (await tzFp400.convertSet(null, 'sensor_layout', {...value, request: 'second'}, meta)).state;
+    assert.equal(failure.layout_status, 'failed');
+    assert.equal(failure.layout_request, 'second');
+    assert.match(failure.layout_error, /rejected/);
+});
+
+test('changing layout names requests a device-specific expose refresh', async () => {
+    const {fp400Extend} = load();
+    let updates = 0;
+    await fp400Extend.onEvent[0]({type: 'deviceOptionsChanged', data: {from: {fp400_layout: 'old'}, to: {fp400_layout: 'new'}, deviceExposesChanged: () => updates++}});
+    assert.equal(updates, 1);
+    await fp400Extend.onEvent[0]({type: 'deviceOptionsChanged', data: {from: {}, to: {}, deviceExposesChanged: () => updates++}});
+    assert.equal(updates, 1);
 });

@@ -15,10 +15,10 @@ test('view leases are per sensor and closing one browser does not stop another',
     f.w.watch('tab2', null); f.tick(); assert.equal(f.w.streams.size, 0);
     f.advance(60000); f.tick(); assert.equal(f.sent.length, 2);
 });
-test('stale browser leases expire while software zones retain their required stream', () => {
+test('saved zones never renew a position stream without viewers', () => {
     const f = fixture(); f.w.watch('tab', 'a'); f.tick(); f.advance(46000); f.tick(); assert.equal(f.w.streams.size, 0);
     const layout = () => ({zones: [{enabled: true, cells: '80' + '00'.repeat(39)}]});
-    f.w.update('b', {zoneMode: 'native'}); f.tick(layout); assert.equal(f.w.streams.has('a'), true); assert.equal(f.w.streams.has('b'), false);
+    f.w.update('b', {zoneMode: 'native'}); f.tick(layout); assert.equal(f.w.streams.has('a'), false); assert.equal(f.w.streams.has('b'), false);
 });
 test('room learning waits ten seconds, ignores cached success and requires fresh confirmation', () => {
     const f = fixture(); f.w.startLearning('a'); f.advance(9999); f.tick(); assert.equal(f.sent.length, 0);

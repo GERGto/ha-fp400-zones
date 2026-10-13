@@ -6,6 +6,7 @@ const store = {
     set(key, value) { try { localStorage.setItem(`fp400.v2.${key}`, JSON.stringify(value)); } catch { /* Private browsing. */ } },
 };
 let snap = null, ws, serial = 0, current = '', view = 'dashboard', step = 0, active = null, tool = 'paint';
+let areaTab = 'zones';
 let layout = normalize(null), dirty = false, undo = [], trace = [], pass = 1, traceStart = 0, toastTimer, lastRenderKey = '';
 let mounting = {mode: 'wall', side: 'wall', height: 2000}, painting = null, transform = null;
 const pending = new Map();
@@ -128,10 +129,16 @@ function render() {
     }; });
     bind(); refreshLive(); requestAnimationFrame(draw);
 }
+function signalIcon(value) {
+    const known = Number.isFinite(value) && value >= 0 && value <= 255;
+    const level = known ? Math.ceil(value / 64) : 0;
+    const label = known ? 'Zigbee link quality: ' + value + ' / 255 LQI' : 'Zigbee link quality unknown';
+    return '<span class="signal" role="img" tabindex="0" aria-label="' + label + '" title="' + label + '"><svg viewBox="0 0 28 24" aria-hidden="true">' + [0,1,2,3].map((i) => '<rect x="' + (i * 7) + '" y="' + (18 - i * 5) + '" width="5" height="' + (6 + i * 5) + '" rx="1" fill="' + (i < level ? 'var(--primary)' : 'var(--line)') + '"/>').join('') + '</svg>' + (known ? '' : '<small>?</small>') + '</span>';
+}
 function dashboard() {
-    return `<div class="pagehead"><div><div class="eyebrow">Your home</div><h1>Presence, room by room</h1><p>Set up your sensors and make every zone count.</p></div><a class="primary button-link" href="#/add">＋ Add sensor</a></div>${prerequisites()}<div class="cards">${snap.devices.map((d) => {
+    return `<div class="pagehead"><div><div class="eyebrow">Your home</div><h1>Presence, room by room</h1><p>Set up your sensors and configure up to 8 zones.</p></div><a class="primary button-link" href="#/add">＋ Add sensor</a></div>${prerequisites()}<div class="cards">${snap.devices.map((d) => {
         const s = states.get(d.ieee) || d.state || {};
-        return `<a class="card device-card" href="#/device/${encodeURIComponent(d.ieee)}"><div class="cardtop"><div class="sensor-icon">◉</div><span class="badge ${d.ready ? 'success' : ''}">${d.ready ? d.profile?.completedAt || d.layout?.zones?.length ? 'Ready' : 'Set up sensor' : 'Connecting'}</span></div><h2>${esc(displayName(d))}</h2><p>Aqara FP400 · ${d.profile?.zoneMode === 'native' ? 'Sensor zones' : 'Software zones'}</p><div class="stats"><div><strong data-presence="${esc(d.ieee)}">${s.presence === true ? 'Present' : s.presence === false ? 'Clear' : '—'}</strong><small>Presence</small></div><div><strong>${d.layout?.zones?.length || 0}</strong><small>Zones</small></div><div><strong data-light="${esc(d.ieee)}">${esc(s.illuminance ?? '—')}</strong><small>Lux</small></div></div></a>`;
+        return `<a class="card device-card" href="#/device/${encodeURIComponent(d.ieee)}"><div class="cardtop"><div class="sensor-icon">◉</div><span data-signal="${esc(d.ieee)}">${signalIcon(s.linkquality)}</span></div><h2>${esc(displayName(d))}</h2><p>Aqara FP400 · ${d.profile?.sensorSavedAt ? 'Sensor zones' : 'Save zones to sensor'}</p><div class="stats"><div><strong data-presence="${esc(d.ieee)}">${s.presence === true ? 'Present' : s.presence === false ? 'Clear' : '—'}</strong><small>Presence</small></div><div><strong>${d.layout?.zones?.length || 0}</strong><small>Zones</small></div><div><strong data-light="${esc(d.ieee)}">${esc(s.illuminance ?? '—')}</strong><small>Lux</small></div></div></a>`;
     }).join('')}<a class="card add-card" href="#/add"><span>＋</span><strong>${snap.devices.length ? 'Add another sensor' : 'Add your first FP400'}</strong><small>Pair a sensor with Zigbee2MQTT</small></a></div>`;
 }
 function pairing() {
@@ -160,8 +167,7 @@ function wizard() {
 }
 function editor() {
     const d = device(); if (!d) return '';
-    const mode = d.profile?.zoneMode || 'software';
-    return `<a class="back" href="#/">← All sensors</a><div class="pagehead"><div><div class="eyebrow">Room overview</div><h1>${esc(displayName(d))}</h1><p id="roomPresence">Waiting for sensor data</p></div><div class="actions">${button('rename', 'Rename')}${button('setupAgain', 'Run setup')}</div></div>${!d.ready ? prerequisites() : ''}<div class="editor"><section class="card map-card"><div class="map-header"><strong>Room plan</strong><span class="badge" id="liveBadge">Live view</span></div><div class="tools">${['paint', 'rect', 'erase'].map((t) => `<button data-tool="${t}" aria-pressed="${tool === t}">${{paint: 'Draw', rect: 'Rectangle', erase: 'Erase'}[t]}</button>`).join('')}${button('undo', 'Undo')}${button('fit', 'Fit room')}<select id="activeZone" aria-label="Selected drawing area"><option value="">Choose an area</option>${layout.zones.map((z) => `<option value="${z.id}">${esc(z.name)}</option>`).join('')}${Object.entries(REGIONS).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></div><div class="map-wrap"><canvas id="map" aria-label="Draw zones and obstacles on the room grid"></canvas></div><div class="map-legend"><span id="mapScale">50 cm cells</span><label><input id="mirror" type="checkbox" ${d.profile?.mirror ? 'checked' : ''}> Mirror view</label></div><p class="note" id="drawHint" style="margin-top:12px">${active ? 'Drag on the grid to draw the selected area.' : 'Add your first zone or select an obstacle tool to draw.'}</p><div class="savebar">${button('saveLayout', dirty ? 'Save changes' : 'Save layout', true)}${button('export', 'Export')}</div></section><aside class="sidebar"><section class="card"><h2>Zones <small>${layout.zones.length}/8</small></h2><div id="zones">${layout.zones.map((z) => `<div class="zone ${active === z.id ? 'selected' : ''}" data-zone="${z.id}"><div class="zone-head"><span class="swatch" style="background:${COLORS[z.id - 1]}"></span><input data-name="${z.id}" aria-label="Zone ${z.id} name" maxlength="80" value="${esc(z.name)}"><span class="badge" data-occupied="${z.id}">—</span></div><div class="zone-controls"><label>Hold <input data-delay="${z.id}" type="number" min="0" max="600" value="${z.delay}" aria-label="Hold time for zone ${z.id}"> s</label><button data-delete="${z.id}" aria-label="Delete zone ${z.id}">×</button></div></div>`).join('')}</div>${layout.zones.length < 8 ? `<button class="new-zone" id="addZone">＋ ${layout.zones.length ? 'Add zone' : 'Create your first zone'}</button>` : ''}<p class="note">${mode === 'native' ? 'Sensor zones report occupancy without a continuous position stream.' : 'Software zones need a position stream even when this page is closed.'}</p></section><section class="card"><h2>Room obstacles</h2><p class="note">Mark excluded space, moving objects or doorways.</p><div class="segment">${Object.entries(REGIONS).map(([k, v]) => `<button data-region="${k}" aria-pressed="${active === k}">${v}</button>`).join('')}</div>${button('clearArea', 'Clear selected area')}${button('writeMasks', 'Apply obstacles to sensor')}<p class="note" style="margin-top:12px">Obstacle changes are sent only when you apply them.</p></section><section class="card"><h2>Zone processing</h2><p>${mode === 'native' ? 'On the sensor' : 'In Zigbee2MQTT'}</p>${button('native', 'Transfer zones to sensor')}<p class="note">Experimental. Writes the saved layout and checks it. Test occupancy before switching to sensor mode.</p>${button('nativeMode', 'Use verified sensor zones', false, state().native_sync !== 'verified')}${button('softwareMode', 'Use software zones')}<p id="nativeStatus" class="note"></p></section></aside></div>`;
+    return `<a class="back" href="#/">← All sensors</a><div class="pagehead"><div><div class="eyebrow">Room overview</div><h1>${esc(displayName(d))}</h1><p id="roomPresence">Waiting for sensor data</p></div><div class="actions">${button('rename', 'Rename')}${button('setupAgain', 'Run setup')}</div></div>${!d.ready ? prerequisites() : ''}<div class="editor"><section class="card map-card"><div class="map-header"><strong>Room plan</strong><span class="badge" id="liveBadge">Live view</span></div><div class="tools">${['paint', 'rect', 'erase'].map((t) => `<button data-tool="${t}" aria-pressed="${tool === t}">${{paint: 'Draw', rect: 'Rectangle', erase: 'Erase'}[t]}</button>`).join('')}${button('undo', 'Undo')}${button('fit', 'Fit room')}<select id="activeZone" aria-label="Selected drawing area"><option value="">Choose an area</option>${layout.zones.map((z) => `<option value="${z.id}">${esc(z.name)}</option>`).join('')}${Object.entries(REGIONS).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></div><div class="map-wrap"><canvas id="map" aria-label="Draw zones and obstacles on the room grid"></canvas></div><div class="map-legend"><span id="mapScale">50 cm cells</span><label><input id="mirror" type="checkbox" ${d.profile?.mirror ? 'checked' : ''}> Mirror view</label></div><p class="note" id="drawHint" style="margin-top:12px">${active ? 'Drag on the grid to draw the selected area.' : 'Add your first zone or select an obstacle tool to draw.'}</p><div class="savebar">${button('saveLayout', dirty ? 'Save changes' : 'Save layout', true)}${button('export', 'Export')}</div></section><aside class="sidebar"><section class="card area-panel"><div class="area-tabs" role="tablist" aria-label="Room areas"><button role="tab" id="zonesTab" aria-selected="${areaTab === 'zones'}">Zones</button><button role="tab" id="obstaclesTab" aria-selected="${areaTab === 'obstacles'}">Obstacles</button></div><div id="zonePanel" ${areaTab === 'zones' ? '' : 'hidden'}><h2>Zones <small>${layout.zones.length}/8</small></h2><div id="zones">${layout.zones.map((z) => `<div class="zone ${active === z.id ? 'selected' : ''}" data-zone="${z.id}"><div class="zone-head"><span class="swatch" style="background:${COLORS[z.id - 1]}"></span><input data-name="${z.id}" aria-label="Zone ${z.id} name" maxlength="80" value="${esc(z.name)}"><span class="badge" data-occupied="${z.id}">—</span></div><div class="zone-controls"><button data-delete="${z.id}" aria-label="Delete zone ${z.id}">×</button></div></div>`).join('')}</div>${layout.zones.length < 8 ? `<button class="new-zone" id="addZone">＋ ${layout.zones.length ? 'Add zone' : 'Create your first zone'}</button>` : ''}<p class="note">Zones and obstacles are transferred and verified when you save.</p></div><div id="obstaclePanel" ${areaTab === 'obstacles' ? '' : 'hidden'}><h2>Adjust detection</h2><p class="note">Choose a purpose, then draw its area on the room plan.</p><div class="segment">${Object.entries(REGIONS).map(([k, v]) => `<button data-region="${k}" aria-pressed="${active === k}"><strong>${v}</strong><small>${{monitoring: 'Space the sensor should ignore', interference: 'Moving objects such as fans or curtains', entry_exit: 'Doorways and room transitions'}[k]}</small></button>`).join('')}</div>${button('clearArea', 'Clear selected area')}<p class="note" style="margin-top:12px">Use Draw, Rectangle or Erase on the map. Save transfers every area together.</p></div></section><section class="card"><h2>Sensor storage</h2><p>Occupancy is evaluated by the FP400. Live positions are requested only while viewing this room.</p><p class="note">Sensor protocol support is experimental. Saving requires matching readback; test occupancy after saving.</p></section></aside></div>`;
 }
 function settings() {
     const debug = store.get('debug', false);
@@ -204,8 +210,10 @@ function bind() {
         });
     }
     if (view === 'editor') {
+        action('zonesTab', () => { areaTab = 'zones'; active = layout.zones[0]?.id ?? null; render(); });
+        action('obstaclesTab', () => { areaTab = 'obstacles'; active = 'monitoring'; render(); });
         $('activeZone').value = active ?? '';
-        $('activeZone').onchange = (e) => { active = e.target.value in REGIONS ? e.target.value : Number(e.target.value) || null; render(); };
+        $('activeZone').onchange = (e) => { active = e.target.value in REGIONS ? e.target.value : Number(e.target.value) || null; areaTab = typeof active === 'string' ? 'obstacles' : 'zones'; render(); };
         action('rename', async () => { const name = prompt('Room / sensor name', displayName(device())); if (name !== null) await call('profile', {ieee: current, name}); });
         action('setupAgain', () => { if (confirm('Run mounting, room learning and boundary setup again? Your saved zones will be kept.')) location.hash = `#/device/${encodeURIComponent(current)}/setup`; });
         action('addZone', () => { undo.push(structuredClone(layout)); const z = addZone(layout); if (z) active = z.id; changed(); render(); $('map').scrollIntoView({block: 'center', behavior: 'smooth'}); });
@@ -220,22 +228,22 @@ function bind() {
         action('fit', () => { fullGrid = !fullGrid; draw(); });
         $('mirror').onchange = async (e) => { try { await call('profile', {ieee: current, mirror: e.target.checked}); } catch (err) { toast(err.message); } };
         action('saveLayout', saveLayout);
-        action('writeMasks', async () => { for (const [key, cells] of Object.entries(layout.regions)) await call('set', {ieee: current, payload: {[{monitoring: 'region_monitoring', interference: 'region_interference', entry_exit: 'region_entry_exit'}[key]]: cells}}); toast('Obstacle commands sent. Sensor readback is shown in diagnostics.'); });
-        action('native', async () => { if (!confirm('Experimental: replace the sensor’s native zones with this saved layout?')) return; await saveLayout(); await call('set', {ieee: current, payload: {native_zones: 'write'}}); toast('Transfer requested. Waiting for sensor readback.'); });
-        action('nativeMode', async () => { if (!confirm('Use native sensor occupancy? Verify each zone by walking in and out after switching.')) return; await call('zoneMode', {ieee: current, mode: 'native'}); });
-        action('softwareMode', () => call('zoneMode', {ieee: current, mode: 'software'}));
         action('export', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(layout, null, 2)], {type: 'application/json'})); a.download = 'fp400-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); });
     }
     if ($('map')) bindCanvas();
 }
 async function saveLayout() {
     const id = current;
-    await call('saveLayout', {ieee: id, layout});
-    if (current === id) { dirty = false; saveDraft(); $('saveLayout').textContent = 'Saved'; }
-    toast('Layout saved. Software zones active; transfer and verify to use sensor zones.');
+    const saved = JSON.stringify(layout);
+    $('saveLayout').textContent = 'Saving to sensor...';
+    try { await call('saveLayout', {ieee: id, layout: JSON.parse(saved)}); }
+    catch (err) { if (current === id && $('saveLayout')) $('saveLayout').textContent = 'Retry save to sensor'; throw err; }
+    if (current === id && JSON.stringify(layout) === saved) { dirty = false; saveDraft(); if ($('saveLayout')) $('saveLayout').textContent = 'Saved to sensor'; }
+    toast('Zones and obstacles verified on sensor.');
 }
 function refreshLive() {
     if (!snap) return;
+    document.querySelectorAll('[data-signal]').forEach((el) => { el.innerHTML = signalIcon(states.get(el.dataset.signal)?.linkquality); });
     document.querySelectorAll('[data-presence]').forEach((el) => { const s = states.get(el.dataset.presence) || {}; el.textContent = s.presence === true ? 'Present' : s.presence === false ? 'Clear' : '—'; });
     document.querySelectorAll('[data-light]').forEach((el) => { el.textContent = states.get(el.dataset.light)?.illuminance ?? '—'; });
     if ($('pairTimer')) { const left = Math.max(0, Math.ceil((snap.permitJoinUntil - Date.now()) / 1000)); $('pairTimer').textContent = left ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : '＋'; $('pair').disabled = left > 0; }
@@ -243,8 +251,8 @@ function refreshLive() {
     const s = state();
     if ($('roomPresence')) $('roomPresence').textContent = `${s.presence === true ? 'Presence detected' : s.presence === false ? 'Room clear' : 'Waiting for presence'} · ${s.illuminance ?? '—'} lx`;
     if ($('liveBadge')) $('liveBadge').textContent = s.targets_updated_at && Date.now() - s.targets_updated_at < 15000 ? 'Live positions received' : 'Waiting for fresh positions';
-    document.querySelectorAll('[data-occupied]').forEach((el) => { const occupied = s[`zone_${el.dataset.occupied}`]; el.textContent = occupied === true ? 'Occupied' : occupied === false ? 'Clear' : '—'; });
-    if ($('nativeStatus')) { $('nativeStatus').textContent = s.native_sync ? `Sensor transfer: ${s.native_sync}${s.native_errors ? ' · ' + s.native_errors : ''}` : ''; $('nativeMode').disabled = s.native_sync !== 'verified' || dirty; }
+    document.querySelectorAll('[data-zone]').forEach((el) => el.classList.toggle('sensor-active', s[`native_zone_${el.dataset.zone}`] === true));
+    document.querySelectorAll('[data-occupied]').forEach((el) => { const occupied = s[`native_zone_${el.dataset.occupied}`]; el.textContent = occupied === true ? 'Occupied' : occupied === false ? 'Clear' : '—'; });
     if ($('learnTimer')) {
         const job = device()?.learning;
         const left = job?.status === 'countdown' ? Math.max(0, Math.ceil((job.begins - Date.now()) / 1000)) : null;

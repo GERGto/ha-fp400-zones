@@ -3,7 +3,7 @@
  *
  * What it does
  *   - presence (EP1), illuminance (EP2), live targets (x/y in cm) from the 0xFC0C location stream
- *   - software zones zone_1 … zone_8, computed from the targets and the layout drawn in the FP400 editor
+ *   - sensor zones zone_1 … zone_8, reported by sensor occupancy endpoints
  *     (stored as the device option `fp400_layout`, i.e. in configuration.yaml – no Aqara hub, no cloud)
  *   - mounting mode / side / height, region masks (monitoring exclusion, interference, entry/exit),
  *     AI background learning
@@ -23,7 +23,7 @@ import * as exposes from 'zigbee-herdsman-converters/lib/exposes';
 const e = exposes.presets;
 const ea = exposes.access;
 
-const CONVERTER_VERSION = '1.2.0';
+const CONVERTER_VERSION = '1.3.0';
 const MFR = 0x115f;
 const MO = {manufacturerCode: MFR};
 const GRID_COLS = 16;
@@ -32,7 +32,6 @@ const MASK_BYTES = 40;
 const CELL_CM = 50;
 const MAX_ZONES = 8;
 const SUBSCRIBE_SECONDS = 3600;
-const SUBSCRIBE_RENEW_MS = 3300 * 1000;
 const DEFAULT_TARGETS_INTERVAL_MS = 1000;
 
 // ZCL data types (numeric, stable across herdsman versions)
@@ -290,70 +289,6 @@ function rt(device) {
     return runtime.get(key);
 }
 
-function evaluateZones(r, layout, targets) {
-    const changes = {};
-    const active = new Set();
-    for (const zone of layout.zones) {
-        if (!zone.enabled) continue;
-        active.add(zone.id);
-        const key = `zone_${zone.id}`;
-        const inside = targets.some((t) => t.cell && maskHas(zone.mask, t.cell.bit));
-        if (inside) {
-            if (r.timers[zone.id]) {
-                clearTimeout(r.timers[zone.id]);
-                r.timers[zone.id] = null;
-            }
-            if (!r.zones[zone.id]) {
-                r.zones[zone.id] = true;
-                changes[key] = true;
-            }
-        } else if (r.zones[zone.id] && !r.timers[zone.id]) {
-            if (zone.delay <= 0) {
-                r.zones[zone.id] = false;
-                changes[key] = false;
-            } else {
-                r.timers[zone.id] = setTimeout(() => {
-                    r.timers[zone.id] = null;
-                    r.zones[zone.id] = false;
-                    r.publish?.({[key]: false});
-                }, zone.delay * 1000);
-            }
-        }
-    }
-    for (let id = 1; id <= MAX_ZONES; id++) {
-        if (!active.has(id) && r.zones[id]) {
-            if (r.timers[id]) clearTimeout(r.timers[id]);
-            r.timers[id] = null;
-            r.zones[id] = false;
-            changes[`zone_${id}`] = false;
-        }
-    }
-    return changes;
-}
-
-function clearZones(r) {
-    const changes = {};
-    for (let id = 1; id <= MAX_ZONES; id++) {
-        if (r.timers[id]) clearTimeout(r.timers[id]);
-        r.timers[id] = null;
-        if (r.zones[id]) {
-            r.zones[id] = false;
-            changes[`zone_${id}`] = false;
-        }
-    }
-    return changes;
-}
-
-function maybeSubscribe(device, options, r, logger) {
-    if (options?.fp400_subscribe !== true) return;
-    const now = Date.now();
-    if (now - r.lastSubscribe < SUBSCRIBE_RENEW_MS) return;
-    r.lastSubscribe = now;
-    const ep = device.getEndpoint(1);
-    ep?.command(CL_LOCATION, 'subscribe', {timeout: SUBSCRIBE_SECONDS}, {...MO, disableDefaultResponse: true})
-        .catch((err) => logger?.debug?.(`FP400 location subscribe failed: ${err.message}`));
-}
-
 const readAttr = (res, name) => res?.[name] ?? res?.[ATTR[name]];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const keyOf = (map, value) => Object.keys(map).find((k) => map[k] === value);
@@ -388,10 +323,9 @@ async function nativeZones(ep, layout, action, encoding) {
         await sleep(400);
     };
     const wanted = action === 'clear' ? [] : layout.zones.filter((z) => z.enabled && maskCount(z.mask) > 0);
-    const wantedIds = new Set(wanted.map((z) => z.id));
     if (action !== 'read') {
         for (let id = 1; id <= MAX_ZONES; id++) {
-            if (!wantedIds.has(id)) await send(typed ? 'removeZoneTyped' : 'removeZonePlain', typed ? Buffer.from([T.U8, id]) : Buffer.from([id]));
+            await send(typed ? 'removeZoneTyped' : 'removeZonePlain', typed ? Buffer.from([T.U8, id]) : Buffer.from([id]));
         }
         for (const zone of wanted) await send(typed ? 'appendZoneTyped' : 'appendZonePlain', encodeZone(zone, typed));
         await sleep(1500);
@@ -424,10 +358,8 @@ const fzOccupancy = {
         if (ep === 1) {
             const r = rt(msg.device);
             r.publish = publish;
-            maybeSubscribe(msg.device, options, r, meta?.logger);
             const out = {presence: occupied};
-            if (!occupied && options?.fp400_zone_mode !== 'native') {
-                Object.assign(out, clearZones(r));
+            if (!occupied) {
                 out.target_count = 0;
                 out.targets = [];
                 r.lastCount = 0;
@@ -435,7 +367,7 @@ const fzOccupancy = {
             return out;
         }
         if (ep >= 3 && ep <= 10) return {[`native_zone_${ep - 2}`]: occupied,
-            ...(options?.fp400_zone_mode === 'native' ? {[`zone_${ep - 2}`]: occupied} : {})};
+            [`zone_${ep - 2}`]: occupied};
     },
 };
 
@@ -449,10 +381,9 @@ const fzLocationRaw = {
         if (!parsed) return;
         const r = rt(msg.device);
         r.publish = publish;
-        maybeSubscribe(msg.device, options, r, meta?.logger);
         const layout = parseLayout(options?.fp400_layout);
         const targets = parsed.targets.map((t) => ({id: t.id, x: t.x, y: t.y, cell: cellOf(t.x, t.y)}));
-        const out = options?.fp400_zone_mode === 'native' ? {} : evaluateZones(r, layout, targets);
+        const out = {};
         const count = Math.max(parsed.declared, targets.length);
         if (count !== r.lastCount) {
             out.target_count = count;
@@ -511,7 +442,7 @@ const fzConfigAttr = {
 
 const tzFp400 = {
     key: ['install_mode', 'side_install', 'install_height', 'region_monitoring', 'region_interference', 'region_entry_exit',
-        'background_learning', 'location_subscribe', 'native_zones'],
+        'background_learning', 'location_subscribe', 'native_zones', 'sensor_layout'],
     convertSet: async (entity, key, value, meta) => {
         const ep = meta.device.getEndpoint(1);
         switch (key) {
@@ -549,6 +480,21 @@ const tzFp400 = {
                 rt(meta.device).lastSubscribe = Date.now();
                 return {};
             }
+            case 'sensor_layout': {
+                const request = value?.request;
+                if (typeof request !== 'string' || request.length > 80 || !value.layout) throw new Error('Invalid sensor layout request');
+                try {
+                    const result = await nativeZones(ep, parseLayout(value.layout), 'write');
+                    if (result.native_sync !== 'verified') throw new Error(result.native_errors || 'Native zone readback does not match the requested layout');
+                    for (const [key, name] of Object.entries(REGIONS)) {
+                        const short = key.replace('region_', '');
+                        await writeVerify(ep, name, T.OCTET, hexToMask(value.layout.regions?.[short] || '0'.repeat(80)));
+                    }
+                    return {state: {...result, layout_request: request, layout_status: 'verified', layout_error: null}};
+                } catch (err) {
+                    return {state: {layout_request: request, layout_status: 'failed', layout_error: err.message}};
+                }
+            }
             case 'native_zones': {
                 const [action, encoding] = String(value).split('_');
                 if (!['write', 'clear', 'read'].includes(action)) throw new Error('native_zones must be write, write_plain, clear, clear_plain or read');
@@ -576,20 +522,20 @@ const fp400Extend = {
     exposes: [
         e.binary('presence', ea.STATE, true, false).withDescription('Presence in the detection area'),
         e.numeric('target_count', ea.STATE).withDescription('Number of reported targets'),
-        ...Array.from({length: MAX_ZONES}, (_, i) =>
-            e.binary(`zone_${i + 1}`, ea.STATE, true, false).withLabel(`Zone ${i + 1}`)
-                .withDescription('Zone occupancy (software or verified native mode)')),
+        (device, options) => Array.from({length: MAX_ZONES}, (_, i) =>
+            e.binary(`zone_${i + 1}`, ea.STATE, true, false).withLabel(parseLayout(options?.fp400_layout).zones.find((z) => z.id === i + 1)?.name || `Zone ${i + 1}`)
+                .withDescription('Zone occupancy reported by the sensor')),
         e.enum('install_mode', ea.ALL, Object.keys(INSTALL_MODES)).withDescription('Mounting type'),
         e.enum('side_install', ea.ALL, Object.keys(SIDE_INSTALLS)).withDescription('Wall position: flat wall or corner'),
         e.numeric('install_height', ea.ALL).withUnit('mm').withValueMin(0).withValueMax(5000).withDescription('Mounting height'),
         e.enum('background_learning', ea.SET, ['start']).withDescription('Start background learning (room must be empty)'),
     ],
     options: [
-        e.enum('fp400_zone_mode', ea.SET, ['software', 'native']).withDescription('Software zones need continuous positions; native mode requires verified sensor zones.'),
         e.text('fp400_layout', ea.SET).withDescription('Zone layout (JSON), managed by FP400 Zones.'),
-        e.binary('fp400_subscribe', ea.SET, true, false)
-            .withDescription('Legacy continuous stream renewal. Leave disabled when the app manages viewing sessions.'),
     ],
+    onEvent: [async (event) => {
+        if (event.type === 'deviceOptionsChanged' && event.data.from?.fp400_layout !== event.data.to?.fp400_layout) event.data.deviceExposesChanged();
+    }],
     configure: [
         async (device, coordinatorEndpoint) => {
             const ep1 = device.getEndpoint(1);
@@ -597,6 +543,12 @@ const fp400Extend = {
             await ep1.configureReporting('msOccupancySensing', [
                 {attribute: 'occupancy', minimumReportInterval: 0, maximumReportInterval: 3600, reportableChange: 0},
             ]);
+            for (let id = 3; id <= 10; id++) {
+                const zone = device.getEndpoint(id);
+                if (!zone?.inputClusters?.includes(0x0406)) continue;
+                await zone.bind('msOccupancySensing', coordinatorEndpoint);
+                await zone.configureReporting('msOccupancySensing', [{attribute: 'occupancy', minimumReportInterval: 0, maximumReportInterval: 3600, reportableChange: 0}]);
+            }
             for (const cluster of [0xfc0a, 0xfc0c]) {
                 try {
                     await ep1.bind(cluster, coordinatorEndpoint);

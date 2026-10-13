@@ -1,7 +1,7 @@
 import {test, expect} from '@playwright/test';
 
 async function mock(page) {
-    const snapshot = {type: 'snapshot', version: '1.1.0', converterVersion: '1.2.0', settings: {theme: 'auto'}, steps: [], log: ['Example diagnostic message'], devices: [
+    const snapshot = {type: 'snapshot', version: '1.2.0', converterVersion: '1.3.0', settings: {theme: 'auto'}, steps: [], log: ['Example diagnostic message'], devices: [
         {ieee: 'sensor-a', name: 'Living room', ready: true, configured: true, profile: {completedAt: 1}, state: {presence: true, illuminance: 24}},
         {ieee: 'sensor-b', name: 'Office', ready: true, configured: true, profile: {}, state: {}},
     ]};
@@ -82,4 +82,27 @@ test('guided setup, timer, manual two-lap completion and themes', async ({page},
     await page.getByLabel('Show technical details and logs').check();
     await expect(page.locator('#logs')).toContainText('Example diagnostic message');
     await page.screenshot({path: `data/settings-dark-${info.project.name}.png`, fullPage: true});
+});
+
+test('native occupancy highlights, obstacle editing and signal quality', async ({page}, info) => {
+    const m = await mock(page);
+    await expect(page.getByRole('img', {name: 'Zigbee link quality unknown'})).toHaveCount(2);
+    m.send({type: 'state', ieee: 'sensor-a', state: {linkquality: 180}});
+    await expect(page.getByRole('img', {name: 'Zigbee link quality: 180 / 255 LQI'})).toBeVisible();
+    await page.getByRole('link', {name: /Living room/}).click();
+    await page.getByRole('button', {name: /Create your first zone/}).click();
+    m.send({type: 'state', ieee: 'sensor-a', state: {zone_1: true}});
+    await expect(page.locator('[data-zone="1"]')).not.toHaveClass(/sensor-active/);
+    m.send({type: 'state', ieee: 'sensor-a', state: {native_zone_1: true}});
+    await expect(page.locator('[data-zone="1"]')).toHaveClass(/sensor-active/);
+    m.send({type: 'state', ieee: 'sensor-a', state: {native_zone_1: false}});
+    await expect(page.locator('[data-zone="1"]')).not.toHaveClass(/sensor-active/);
+    await page.getByRole('tab', {name: 'Obstacles', exact: true}).click();
+    await expect(page.locator('#zonePanel')).toBeHidden();
+    await expect(page.locator('#obstaclePanel')).toBeVisible();
+    await page.getByRole('button', {name: /Interference Moving objects/}).click();
+    await expect(page.getByLabel('Selected drawing area')).toHaveValue('interference');
+    await page.screenshot({path: 'data/obstacles-' + info.project.name + '.png', fullPage: true});
+    await expect(page.getByRole('button', {name: 'Use software zones'})).toHaveCount(0);
+    await expect(page.locator('body')).toHaveJSProperty('scrollWidth', await page.evaluate(() => innerWidth));
 });

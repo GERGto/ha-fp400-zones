@@ -44,7 +44,7 @@ export class Workflow {
         this.log(job.status === 'complete' ? 'info' : 'warn', `Room learning ${job.status}`);
         this.changed();
     }
-    tick(devices, layouts) {
+    tick(devices) {
         const now = this.now();
         const ids = new Set(devices);
         for (const [owner, lease] of this.viewers) if (lease.until < now || !ids.has(lease.id)) this.viewers.delete(owner);
@@ -65,14 +65,13 @@ export class Workflow {
         }
         for (const id of devices) {
             const watched = [...this.viewers.values()].some((v) => v.id === id);
-            const software = this.profile(id).zoneMode !== 'native' && (layouts(id)?.zones || []).some((z) => z.enabled !== false && /[1-9a-f]/i.test(z.cells || ''));
-            const wanted = watched || software;
+            const wanted = watched;
             const previous = this.streams.get(id);
             if (wanted && (!previous || now - previous.sent >= 30000)) {
                 try {
                     this.send(id, {location_subscribe: 60});
-                    this.streams.set(id, {sent: now, reason: software ? 'software zones' : 'visible editor'});
-                    if (!previous) this.log('info', `Position stream requested for ${software ? 'software zones' : 'a visible editor'} (60-second lease)`);
+                    this.streams.set(id, {sent: now, reason: 'visible editor'});
+                    if (!previous) this.log('info', `Position stream requested for a visible editor (60-second lease)`);
                 } catch { /* Retry while MQTT or the device is unavailable. */ }
             } else if (!wanted && previous) {
                 this.streams.delete(id);

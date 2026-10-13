@@ -8,7 +8,7 @@ A Home Assistant app for setting up and managing multiple Aqara FP400 sensors in
 - Guided mounting selection, interactive height adjustment, empty-room learning and live boundary tracing.
 - Per-room editor with up to eight zones, obstacle masks, undo and local drafts.
 - Automatic converter installation and sensor configuration through Zigbee2MQTT.
-- Live viewing sessions with expiring stream requests; experimental verified native zone processing.
+- Live viewing sessions with expiring stream requests; verified sensor zone storage.
 
 ## Install
 
@@ -26,11 +26,13 @@ Select **Add sensor** on the dashboard, pair the FP400, then open its tile. The 
 
 Existing saved zones are retained during upgrade and open directly in the editor. **Run setup** repeats calibration without deleting zones. New rooms begin with an empty zone list.
 
-## Position streams and sensor zones
+## Sensor zones and live viewing
 
-Software zones are the default and require continuous position reports even with the editor closed. Native zone transfer is experimental: exact readback must match the saved layout before switching to sensor processing. Test entry and exit in every zone after switching. A successful transfer alone does not prove occupancy reporting works with every firmware.
+From 1.2.0, all zone occupancy is reported by the FP400. Software zone processing has been removed. **Save changes** transfers the complete zone layout and all obstacle masks to the sensor, verifies readback, and only then saves the local/Zigbee2MQTT backup. There is no separate transfer or mode-switch button. A failed write stays unsaved and may have partially changed the sensor; retry by saving the complete layout again.
 
-In native mode, or with no active software zones, opening the editor requests a 60-second stream and renews it while visible. Leaving or hiding the page stops renewal; the final request expires within 60 seconds. A lost connection expires its viewer lease within 45 seconds. Multiple viewers are handled independently. Saving a changed layout returns to software mode until it is transferred and verified again.
+After upgrading, open each existing room and save once to transfer its layout. Until this succeeds, old software-only zones are not evaluated. Test each zone by walking in and out: native sensor protocol support remains experimental. Names are displayed in Zigbee2MQTT while technical keys such as zone_1 stay stable. Green zone borders reflect native occupancy reports only.
+
+The editor renews a 60-second position subscription while visible. Leaving/hiding it stops renewal; disconnected viewer leases expire within 45 seconds. Stored zones never request a continuous stream. Dashboard signal bars show reported Zigbee LQI (0-255), not a percentage or guaranteed online status.
 
 Room tracing estimates the outer envelope of your walk; it is not a measurement of actual walls or recesses. The sensor grid remains 16 by 20 cells of 50 cm. The viewport fits the estimated room.
 

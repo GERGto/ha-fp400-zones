@@ -16,19 +16,21 @@ The physical grid stays at 50 cm per cell; the view fits the estimated room. Mir
 
 ## Zones and obstacles
 
-Create up to eight zones. Zone IDs stay stable when another zone is deleted. Hold time delays software-zone clearing to reduce boundary flicker. Unsaved drafts are stored separately per sensor in this browser. Saving writes the layout to Zigbee2MQTT and keeps a backup in app storage; Export downloads JSON.
+Use the **Zones** and **Obstacles** tabs in the same room editor. Create up to eight named zones; their numeric IDs remain stable after deletion or renaming. The green outline means the sensor reports that zone occupied. It never comes from calculating a person's position inside the drawn shape.
 
-Choose Exclusion, Interference or Entry / exit under **Room obstacles**, draw on the map, and explicitly apply the masks to the sensor. Clear selected area removes its draft mask; apply it to write the empty mask. These masks are separate from zone occupancy.
+Under Obstacles, choose Exclusion (ignored space), Interference (moving objects), or Entry / exit (doorways). Draw the area on the same map using Draw, Rectangle and Erase. Clear selected area empties that mask in the draft. The map's area selector lets phone users switch areas without scrolling back to the list.
 
-Zigbee2MQTT MQTT discovery provides `presence`, `illuminance`, `target_count` and `zone_1` through `zone_8`. Empty/unconfigured zone entities may still exist in Home Assistant because converter capabilities are fixed. The app creates no separate HA services or events.
+**Save changes** transfers all zones AND all obstacle masks to the sensor. It replaces the sensor's zone layout and waits for matching readback before reporting success. Do not close the page while saving. If saving fails, the draft remains unsaved; the sensor may be partly changed. Retry by saving the complete layout again. Export downloads the draft JSON.
 
-## Live viewing and native zones
+Zigbee2MQTT shows saved zone names as labels while preserving zone_1 through zone_8 MQTT keys. The app requests an expose refresh after a saved layout changes. Reload the Zigbee2MQTT device page if it remains open with old labels. Home Assistant names manually overridden by the user are not renamed by this app.
 
-Software processing is the default: active software zones require a continuous position stream. Closing the editor cannot stop that stream without breaking those zones.
+## Upgrading and live viewing
 
-**Transfer zones to sensor** writes the saved layout and compares readback. **Use verified sensor zones** is available only after successful verification of that layout. Native mode is experimental: walk into and out of every zone and check actual occupancy before relying on it. Software hold delays are not applied to native reports. Use **Use software zones** if native reporting fails.
+Software zones have been removed in 1.2.0. Existing layouts remain available, but each room must be saved once to transfer its zones to the sensor. Old software-only zones will not continue to calculate occupancy. Native protocol support remains experimental: verify actual entry and exit reports after saving.
 
-When native processing is active, or no software zones exist, the app renews a short position subscription only while the editor or boundary tracing view is visible. Hiding/leaving the page stops renewal; the last request expires within 60 seconds. A disconnected browser's lease expires within 45 seconds. Multiple viewers are independent. Saving an edited layout activates software processing until native zones are transferred and verified again. Leave Zigbee2MQTT's legacy `fp400_subscribe` option disabled when this app manages streams.
+Position streams are only renewed while viewing a room or tracing its boundary. They are not needed for stored sensor zones. Leaving or hiding the page stops renewal; the sensor's last request expires within 60 seconds. A disconnected browser's viewer lease expires within 45 seconds. Multiple viewers are independent. Legacy continuous-stream settings are ignored by the new converter.
+
+Dashboard signal bars use the last reported Zigbee2MQTT linkquality value. Focus or hover the icon to read the exact LQI (0-255). Unknown quality shows a question mark. LQI is not a percentage or a guarantee that a sensor is currently online.
 
 ## Appearance and diagnostics
 

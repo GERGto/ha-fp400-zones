@@ -110,6 +110,10 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
                         interview_completed: true, definition: {model: 'PS-S05D', description: 'FP400-Zonen'}}]);
                 }
             }
+            if (packet.cmd === 'publish' && packet.topic.endsWith('/Example sensor/set')) {
+                const request = JSON.parse(packet.payload).sensor_layout;
+                if (request) publish('Example sensor', {layout_request: request.request, layout_status: rejectLayout ? 'failed' : 'verified', layout_error: 'Example sensor failure'});
+            }
             if (packet.cmd === 'publish' && packet.topic.includes('/bridge/request/')) {
                 const topic = packet.topic.split('/bridge/request/')[1];
                 const request = JSON.parse(packet.payload);

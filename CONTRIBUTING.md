@@ -13,4 +13,4 @@ Browser tests use a simulated WebSocket backend and separate temporary data; the
 
 Keep UI strings and documentation in English. Check desktop and narrow mobile layouts, touch controls, light/dark themes, per-device state isolation and reconnect behavior. Do not commit `.env`, data directories, screenshots containing personal room information, or raw MQTT captures.
 
-CI runs JavaScript checks, browser flows, add-on metadata lint and container builds for amd64/aarch64. Changes to protocol behavior must document limitations and preserve existing software-zone automations.
+CI runs JavaScript checks, browser flows, add-on metadata lint and container builds for amd64/aarch64. Changes to protocol behavior must document limitations and document migration from older layouts.

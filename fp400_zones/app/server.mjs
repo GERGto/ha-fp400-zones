@@ -152,7 +152,7 @@ function snapshot() {
         baseTopic: BASE,
         converterVersion: CONVERTER_VERSION,
         autoSetup: AUTO_SETUP,
-        version: '1.1.0',
+        version: '1.2.0',
         settings: persisted.settings,
         connections: {mqtt: S.mqtt.status, z2m: S.bridge.state},
         permitJoinUntil: S.permitJoinUntil,
@@ -398,16 +398,6 @@ const actions = {
     },
     async learn({ieee}) { requireDevice(ieee); return workflow.startLearning(ieee); },
     async cancelLearn({ieee}) { requireDevice(ieee); workflow.cancelLearning(ieee); },
-    async zoneMode({ieee, mode}) {
-        requireDevice(ieee);
-        if (!['software', 'native'].includes(mode)) throw new Error('Invalid zone mode');
-        const layout = normalize(layoutFor(ieee).layout);
-        const signature = layout.zones.filter((z) => z.enabled !== false && /[1-9a-f]/i.test(z.cells)).map((z) => `${z.id}:${z.cells}`).sort().join('|');
-        const state = S.states.get(ieee);
-        if (mode === 'native' && (state?.native_sync !== 'verified' || state.native_layout !== signature)) throw new Error('Write and verify the current saved zones first');
-        await z2mRequest('device/options', {id: ieee, options: {fp400_zone_mode: mode, fp400_subscribe: false}});
-        return workflow.update(ieee, {zoneMode: mode});
-    },
     async closeJoin() {
         await z2mRequest('permit_join', {time: 0});
         S.permitJoinUntil = 0;
@@ -462,16 +452,36 @@ const actions = {
         });
     },
     async saveLayout({ieee, layout}) {
-        if (!S.devices.some((d) => d.ieee_address === ieee)) throw new Error('Device not found');
+        const d = requireDevice(ieee);
         if (!layout || typeof layout !== 'object' || !Array.isArray(layout.zones)) throw new Error('Invalid layout');
         layout = normalize(layout);
-        await z2mRequest('device/options', {id: ieee, options: {fp400_layout: JSON.stringify(layout), fp400_zone_mode: 'software', fp400_subscribe: false}});
-        workflow.update(ieee, {zoneMode: 'software'});
-        if (S.bridge.info?.config?.devices?.[ieee]) S.bridge.info.config.devices[ieee].fp400_layout = JSON.stringify(layout);
-        persisted.layouts[ieee] = layout;
-        persist();
-        log('info', `Layout saved: ${layout.zones.length} zones; software processing active until native transfer is verified`);
-        scheduleBroadcast();
+        if (ourConverter()?.code !== CONVERTER_CODE) throw new Error('Wait for the current converter to finish installing before saving');
+        return runAction('saveLayout', async () => {
+            const request = crypto.randomUUID();
+            log('info', 'Writing zones and obstacle masks to sensor; waiting for readback');
+            publish(BASE + '/' + d.friendly_name + '/set', {sensor_layout: {request, layout}});
+            await new Promise((resolve, reject) => {
+                const deadline = Date.now() + 75000;
+                const timer = setInterval(() => {
+                    const state = S.states.get(ieee);
+                    if (state?.layout_request === request) {
+                        clearInterval(timer);
+                        if (state.layout_status === 'verified') resolve();
+                        else reject(new Error(state.layout_error || 'Sensor layout verification failed. Re-save the complete layout to retry.'));
+                    } else if (Date.now() >= deadline) {
+                        clearInterval(timer);
+                        reject(new Error('No sensor confirmation. The sensor may be partially updated; re-save the complete layout to retry.'));
+                    }
+                }, 100);
+            });
+            await z2mRequest('device/options', {id: ieee, options: {fp400_layout: JSON.stringify(layout), fp400_zone_mode: 'native', fp400_subscribe: false}});
+            persisted.layouts[ieee] = layout;
+            workflow.update(ieee, {zoneMode: 'native', sensorSavedAt: Date.now()});
+            if (S.bridge.info?.config?.devices?.[ieee]) S.bridge.info.config.devices[ieee].fp400_layout = JSON.stringify(layout);
+            persist();
+            log('info', 'Zones and obstacles verified on sensor and layout backup saved');
+            scheduleBroadcast();
+        });
     },
     async set({ieee, payload}) {
         const d = S.devices.find((x) => x.ieee_address === ieee);
@@ -641,7 +651,7 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-    log('info', `FP400 Zones 1.1.0 (converter ${CONVERTER_VERSION}) listening on port ${server.address().port} (${ADDON ? 'Home Assistant app' : 'Standalone'})`);
+    log('info', `FP400 Zones 1.2.0 (converter ${CONVERTER_VERSION}) listening on port ${server.address().port} (${ADDON ? 'Home Assistant app' : 'Standalone'})`);
     connectMqtt();
 });
 

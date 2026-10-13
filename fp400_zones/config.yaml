@@ -1,5 +1,5 @@
 name: FP400 Zones
-version: "1.1.0"
+version: "1.2.0"
 slug: fp400_zones
 description: Guided room setup and zones for Aqara FP400 in Zigbee2MQTT
 url: https://github.com/GERGto/ha-fp400-zones

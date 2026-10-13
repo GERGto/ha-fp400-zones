@@ -1,3 +1,11 @@
+# Release verification: 1.2.0
+
+Sensor-only zone storage replaces software evaluation. Saving waits for a unique correlated converter result, verifies zone and mask readback, and only then updates backups. Failure does not report success. Device-specific expose labels refresh on layout changes. Position leases are viewer-only. Green highlighting reads native occupancy reports.
+
+Validation includes 21 Node tests and nine Chromium scenarios across desktop and two mobile widths. Tests use simulated sensor/MQTT data; physical firmware behavior remains experimental. Existing rooms require one save after upgrading. See the Checks workflow for both architecture builds and metadata lint.
+
+The preceding review below records version 1.1.0 and its historical behavior. Software-zone behavior described below no longer applies.
+
 ﻿# Release verification: 1.1.0
 
 This release remains experimental. It adds a responsive multi-sensor workflow to the existing Home Assistant app; converter version is 1.2.0.

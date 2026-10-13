@@ -7,3 +7,7 @@
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 .button-link{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 18px;border-radius:12px;font-weight:600}.zone-head input{background:transparent;color:var(--text);border:0;border-bottom:1px solid var(--line);padding:8px;min-width:0;width:100%;font-size:16px}.tools select{min-height:44px;max-width:100%;min-width:0;padding:8px 12px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:10px}.map-wrap{scroll-margin-top:130px}@media(max-width:800px){.tools select{width:100%}}
+
+.area-tabs{display:flex;border-bottom:1px solid var(--line);gap:8px;margin-bottom:20px}.area-tabs button{flex:1;border:0;border-radius:0;background:transparent}.area-tabs button[aria-selected=true]{color:var(--primary);border-bottom:3px solid var(--accent)}.area-panel .segment{display:grid;gap:10px}.area-panel .segment button{text-align:left;display:flex;flex-direction:column;gap:4px;width:100%}.area-panel .segment small{font-weight:400}.zone.sensor-active{border:2px solid var(--success);box-shadow:0 0 0 1px var(--success)}.zone.sensor-active .badge{color:var(--success)}
+
+.signal{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px}.signal svg{width:28px;height:24px}.signal small{position:absolute;right:-4px;top:0}
