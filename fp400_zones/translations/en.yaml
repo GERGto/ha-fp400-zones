@@ -7,7 +7,7 @@ configuration:
     description: Install and update the converter automatically and configure the sensor.
   mqtt_url:
     name: MQTT server (optional)
-    description: Only needed if you don't use the Mosquitto add-on, e.g. mqtt://192.168.1.10:1883
+    description: Only needed if you don't use the Mosquitto add-on, e.g. mqtt://mqtt.example.invalid:1883
   mqtt_user:
     name: MQTT user (optional)
   mqtt_password:

@@ -1,2 +1,8 @@
 app/node_modules
 app/data
+app/.npm-cache
+app/test
+app/scripts
+app/eslint.config.mjs
+**/*.log
+**/.env*

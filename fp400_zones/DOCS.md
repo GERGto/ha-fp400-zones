@@ -4,7 +4,8 @@ Zonen für den Aqara FP400 (Spatial Multi-Sensor) in Zigbee2MQTT. Du brauchst ke
 
 ## Voraussetzungen
 
-- Zigbee2MQTT ab Version 2.0, mit dem FP400 bereits angelernt (das Anlernen geht notfalls auch aus der App heraus)
+- Home Assistant OS mit Supervisor auf `amd64` oder `aarch64`. Die minimale HA-/Z2M-Version ist noch nicht durch einen Hardwaretest belegt.
+- Zigbee2MQTT 2.x mit MQTT-Converter-API und Home-Assistant-MQTT-Discovery, mit dem FP400 bereits angelernt (das Anlernen geht notfalls auch aus der App heraus)
 - Mosquitto-Broker-App (früher Add-on). Die Zugangsdaten holt sich die App automatisch.
 
 ## Einrichtung
@@ -34,8 +35,12 @@ Das Layout wird in der Z2M-`configuration.yaml` gespeichert, als Geräteoption `
 | Option | Bedeutung |
 |---|---|
 | `base_topic` | Basis-Topic von Zigbee2MQTT, Standard `zigbee2mqtt` |
-| `auto_setup` | Converter automatisch installieren und Sensor konfigurieren. Ist die Option aus, bleiben die Knöpfe in der Checkliste trotzdem nutzbar. |
-| `mqtt_url`, `mqtt_user`, `mqtt_password` | Nur nötig ohne die Mosquitto-App, z. B. `mqtt://192.168.1.10:1883` |
+| `auto_setup` | Standard `true`: Converter automatisch installieren und Sensor konfigurieren. Ist die Option aus, bleiben die Knöpfe in der Checkliste trotzdem nutzbar. |
+| `mqtt_url`, `mqtt_user`, `mqtt_password` | Nur nötig ohne die Mosquitto-App, z. B. `mqtt://mqtt.example.invalid:1883` |
+
+Die drei optionalen MQTT-Werte haben keinen vorbelegten Zugang. Ersetze den Beispielhost durch deinen Broker. Ein gesetztes `mqtt_url` hat Vorrang vor den automatisch ermittelten Supervisor-Zugangsdaten. TLS (`mqtts://`) prüft das Serverzertifikat; ungültige oder nicht vertrauenswürdige Zertifikate werden abgewiesen. Die App fordert weiterhin den MQTT-Dienst des Supervisors an (`mqtt:need`).
+
+Die App schreibt auf ausdrücklichen Klick Sensor-Masken und Montageparameter. Automatische Einrichtung installiert Code in Zigbee2MQTT und kann den Sensor konfigurieren. Diese Änderungen überleben die Deinstallation der App. Vor der Ersteinrichtung die Z2M-Konfiguration sichern.
 
 ## Fehlersuche
 
@@ -49,3 +54,13 @@ Das Layout wird in der Z2M-`configuration.yaml` gespeichert, als Geräteoption `
 
 - Die Zonen werden aus den Positionen berechnet, die der Sensor liefert (Software-Zonen). Die nativen Zonen im Sensor lassen sich unter „Experimentell“ schreiben. Dieses Protokoll ist aber noch nicht bestätigt.
 - Das Protokoll stammt aus Community-Mitschnitten (Koenkk/zigbee2mqtt#33146) und dem Matter-Modell derselben Cluster. Es ist keine offizielle Aqara-Dokumentation.
+
+## Datenschutz, Protokolle und Deinstallation
+
+Layouts/Gerätekennungen liegen in `/data/state.json`, Zigbee2MQTT und im lokalen Browser-Speicher (`fp400.*`). Es gibt keine eigene Telemetrie. Ein außerhalb des Heimnetzes konfigurierter MQTT-Broker empfängt die Daten entsprechend extern. Backups und Exporte können Raumdaten und Zugangsdaten enthalten.
+
+Die App-Protokolle sind im Reiter „Protokoll“ sichtbar. Einen eigenen Debug-Schalter gibt es nicht. Für Zigbee2MQTT bei Bedarf vorübergehend `advanced.log_level: debug` verwenden und danach zurücksetzen; vor dem Teilen private Inhalte entfernen.
+
+Zum Entfernen zuerst gewünschte Sensor-Masken/native Zonen zurücksetzen, dann die App stoppen, ihren Converter und ihre Geräteoptionen in Zigbee2MQTT entfernen und die App deinstallieren. Anschließend verbliebene FP400-Discovery-Entitäten, Browser-Entwürfe, Exporte und Backups prüfen. Montage und Bindings im Sensor werden nicht automatisch zurückgesetzt. Die vollständige Schrittfolge steht im [Repository-README](https://github.com/GERGto/ha-fp400-zones#deinstallation).
+
+Keine eigenen HA-Dienste oder Events; Entitäten werden von Zigbee2MQTT per MQTT-Discovery bereitgestellt. Lizenz: [MIT](https://github.com/GERGto/ha-fp400-zones/blob/main/LICENSE). Unterstützung: [Issue-Tracker](https://github.com/GERGto/ha-fp400-zones/issues).
