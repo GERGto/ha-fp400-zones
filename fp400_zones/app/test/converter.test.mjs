@@ -5,14 +5,14 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {test} from 'node:test';
 
-function load() {
+function load(timers = {}) {
     const builder = new Proxy(() => builder, {get: () => builder});
     const code = fs.readFileSync(new URL('../converter/aqara-fp400-zones.mjs', import.meta.url), 'utf8')
         .replace(/^import .*;$/gm, '')
         .replace('export default {', 'const definition = {');
-    const context = vm.createContext({Buffer, setTimeout: (fn) => setTimeout(fn, 0), clearTimeout,
-        m: builder, exposes: {presets: builder, access: {STATE: 1, SET: 2, ALL: 7}}});
-    vm.runInContext(`${code}\nglobalThis.helpers = {parseLayout, parseLocation, cellOf, rt, tzFp400, fzOccupancy, fp400Extend, ATTR, encodeZone, nativeZones, clusterConfig};`, context);
+    const context = vm.createContext({Buffer, setTimeout: (fn) => setTimeout(fn, 0), clearTimeout, ...timers,
+        logger: {warning: () => {}}, m: builder, exposes: {presets: builder, access: {STATE: 1, SET: 2, ALL: 7}}});
+    vm.runInContext(`${code}\nglobalThis.helpers = {parseLayout, parseLocation, cellOf, rt, tzFp400, fzOccupancy, fp400Extend, ATTR, encodeZone, nativeZones, clusterConfig, pollMissingZones};`, context);
     return context.helpers;
 }
 
@@ -21,6 +21,52 @@ test('malformed layouts cannot crash the converter', () => {
     for (const raw of ['null', '1', 'broken', '{"zones":[null,1,{}]}']) {
         assert.equal(parseLayout(raw).zones.length, 0);
     }
+});
+
+test('reporting exhaustion does not prevent configuration of later zone endpoints', async () => {
+    const {fp400Extend} = load();
+    const bound = [];
+    const endpoints = new Map(Array.from({length: 10}, (_, i) => [i + 1, {
+        inputClusters: [0x0406], bind: async () => { bound.push(i + 1); },
+        configureReporting: async () => { if (i >= 5) throw new Error('INSUFFICIENT_SPACE'); },
+        read: async () => ({installMode: 1, sideInstall: 1}),
+    }]));
+    await fp400Extend.configure[0]({getEndpoint: (id) => endpoints.get(id)}, {});
+    assert.ok(bound.includes(10));
+    endpoints.get(6).configureReporting = async () => { throw new Error('Device unavailable'); };
+    await assert.rejects(fp400Extend.configure[0]({getEndpoint: (id) => endpoints.get(id)}, {}), /unavailable/);
+});
+
+test('fallback reads only enabled, nonempty sensor zones without reporting and continues after failure', async () => {
+    const {pollMissingZones} = load();
+    const reads = [];
+    const cells = '80' + '00'.repeat(39);
+    const options = {fp400_layout: {zones: [1, 2, 3, 4, 5].map(id => ({id, cells: id === 3 ? '00'.repeat(40) : cells, enabled: id !== 2}))}};
+    const device = {getEndpoint: (id) => ({
+        configuredReportings: id === 3 ? [{cluster: {ID: 0x0406}, attribute: {ID: 0}, maximumReportInterval: 3600}] : [],
+        read: async (cluster, attrs) => { reads.push([id, cluster, ...attrs]); if (id === 6) throw new Error('timeout'); },
+    })};
+    assert.equal(await pollMissingZones(device, options), true);
+    assert.deepEqual(reads, [[6, 'msOccupancySensing', 'occupancy'], [7, 'msOccupancySensing', 'occupancy']]);
+});
+
+test('native polling uses current options, does not duplicate timers, and stops cleanly', async () => {
+    const scheduled = new Map(); let next = 0; const reads = [];
+    const {fp400Extend} = load({setTimeout: (fn, ms) => { scheduled.set(++next, {fn, ms}); return next; }, clearTimeout: (id) => scheduled.delete(id)});
+    const event = fp400Extend.onEvent[1];
+    const device = {ieeeAddr: 'poll-device', getEndpoint: (id) => ({read: async () => { reads.push(id); }})};
+    const options = {fp400_layout: {zones: [{id: 4, cells: '80' + '00'.repeat(39)}]}};
+    event({type: 'start', data: {device, options}});
+    event({type: 'deviceAnnounce', data: {device, options}});
+    assert.equal(scheduled.size, 1);
+    const first = scheduled.get(1); scheduled.delete(1); await first.fn();
+    assert.deepEqual(reads, [6]);
+    assert.equal(scheduled.get(2).ms, 10000);
+    event({type: 'deviceOptionsChanged', data: {device, options: {fp400_layout: {zones: []}}}});
+    const second = scheduled.get(2); scheduled.delete(2); await second.fn();
+    assert.deepEqual(reads, [6]);
+    event({type: 'stop', data: {ieeeAddr: device.ieeeAddr}});
+    assert.equal(scheduled.size, 0);
 });
 
 test('view subscriptions expire and occupancy always comes from the sensor', async () => {

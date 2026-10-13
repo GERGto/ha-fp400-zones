@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## 1.2.3
+
+- Handle the FP400's limited reporting table without aborting setup of later zones.
+- Read enabled, saved sensor zones without occupancy reporting every 10 seconds. These remain native sensor states; no software zones or continuous position stream are used.
+- Back off failed reads to 60 seconds and stop polling when the converter stops.
+- Converter version 1.3.2. Restart Zigbee2MQTT after updating to activate the polling lifecycle.
+- Sensor absence confirmation and occasional residual radar targets are unchanged; this update does not claim to fix them.
+
 ## 1.2.2
 
 - Fixed native Zigbee zone command encoding: enum8 zone type, no outer struct tag, and one-byte removal IDs.

@@ -32,6 +32,12 @@ Position streams are only renewed while viewing a room or tracing its boundary. 
 
 Dashboard signal bars use the last reported Zigbee2MQTT linkquality value. Focus or hover the icon to read the exact LQI (0-255). Unknown quality shows a question mark. LQI is not a percentage or a guarantee that a sensor is currently online.
 
+## Occupancy reporting and delayed clearing
+
+Some FP400 firmware accepts only five reporting entries. Global presence and illuminance use two, leaving three for immediate zone reports. The converter reads enabled, saved zones without reporting every 10 seconds. These values still come directly from the sensor. A polling cycle adds up to roughly 10 seconds in normal operation; Zigbee delays and retry backoff can increase this. Failed reads are retried after 60 seconds. Restart Zigbee2MQTT after upgrading to 1.2.3 so the polling lifecycle starts.
+
+The sensor can delay reporting a zone clear through its own absence confirmation setting. The app does not apply a further occupancy hold timer. Multiple radar tracks can temporarily represent one person; stationary tracks are not automatically discarded because a real person may be sitting still. Neither behavior is corrected by the reporting fallback.
+
 ## Appearance and diagnostics
 
 **Settings > Appearance** offers Home Assistant / system, Light and Dark. Automatic follows the parent Home Assistant theme when accessible; otherwise it uses the device preference. The explicit theme choice applies across sensors.

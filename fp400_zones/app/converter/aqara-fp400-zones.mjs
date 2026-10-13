@@ -19,11 +19,12 @@
  */
 import * as m from 'zigbee-herdsman-converters/lib/modernExtend';
 import * as exposes from 'zigbee-herdsman-converters/lib/exposes';
+import {logger} from 'zigbee-herdsman-converters/lib/logger';
 
 const e = exposes.presets;
 const ea = exposes.access;
 
-const CONVERTER_VERSION = '1.3.1';
+const CONVERTER_VERSION = '1.3.2';
 const MFR = 0x115f;
 const MO = {manufacturerCode: MFR};
 const GRID_COLS = 16;
@@ -274,7 +275,7 @@ function parseLayout(raw) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Per-device runtime state (zone hold timers, publish throttling)
+// Per-device runtime state and native occupancy polling fallback.
 
 const runtime = new Map();
 
@@ -289,6 +290,49 @@ function rt(device) {
 
 const readAttr = (res, name) => res?.[name] ?? res?.[ATTR[name]];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const zonePollers = new Map();
+function hasOccupancyReporting(endpoint) {
+    return endpoint.configuredReportings?.some((r) => r.cluster.ID === 0x0406 && r.attribute.ID === 0 && r.maximumReportInterval !== 0xffff);
+}
+async function pollMissingZones(device, options) {
+    let failed = false;
+    for (const zone of parseLayout(options?.fp400_layout).zones) {
+        if (!zone.enabled || !zone.mask.some((byte) => byte !== 0)) continue;
+        const endpoint = device.getEndpoint(zone.id + 2);
+        if (!endpoint || hasOccupancyReporting(endpoint)) continue;
+        try {
+            // readResponse passes through fzOccupancy: this is the sensor's state, never a coordinate calculation.
+            await endpoint.read('msOccupancySensing', ['occupancy']);
+        } catch {
+            failed = true;
+        }
+    }
+    return failed;
+}
+function zonePollingEvent(event) {
+    const id = event.data.device?.ieeeAddr ?? event.data.ieeeAddr;
+    if (event.type === 'stop') {
+        const previous = zonePollers.get(id);
+        if (previous) { previous.stopped = true; clearTimeout(previous.timer); }
+        zonePollers.delete(id);
+        runtime.delete(id);
+        return;
+    }
+    if (!event.data.device) return;
+    const existing = zonePollers.get(id);
+    if (existing) { existing.options = event.data.options; return; }
+    const poller = {device: event.data.device, options: event.data.options, stopped: false};
+    zonePollers.set(id, poller);
+    const tick = async () => {
+        if (poller.stopped) return;
+        const failed = await pollMissingZones(poller.device, poller.options);
+        if (poller.stopped) return;
+        if (failed) logger.warning('Native zone read failed; retrying in 60 seconds.', 'zhc:fp400');
+        poller.timer = setTimeout(tick, failed ? 60000 : 10000);
+    };
+    poller.timer = setTimeout(tick, 1000);
+}
 const keyOf = (map, value) => Object.keys(map).find((k) => map[k] === value);
 
 async function writeVerify(ep, name, type, value) {
@@ -533,7 +577,7 @@ const fp400Extend = {
     ],
     onEvent: [async (event) => {
         if (event.type === 'deviceOptionsChanged' && event.data.from?.fp400_layout !== event.data.to?.fp400_layout) event.data.deviceExposesChanged();
-    }],
+    }, zonePollingEvent],
     configure: [
         async (device, coordinatorEndpoint) => {
             const ep1 = device.getEndpoint(1);
@@ -545,7 +589,12 @@ const fp400Extend = {
                 const zone = device.getEndpoint(id);
                 if (!zone?.inputClusters?.includes(0x0406)) continue;
                 await zone.bind('msOccupancySensing', coordinatorEndpoint);
-                await zone.configureReporting('msOccupancySensing', [{attribute: 'occupancy', minimumReportInterval: 0, maximumReportInterval: 3600, reportableChange: 0}]);
+                try {
+                    await zone.configureReporting('msOccupancySensing', [{attribute: 'occupancy', minimumReportInterval: 0, maximumReportInterval: 3600, reportableChange: 0}]);
+                } catch (error) {
+                    if (!String(error).includes('INSUFFICIENT_SPACE')) throw error;
+                    logger.warning(`Reporting table full for zone ${id - 2}; saved zones without reporting will be read every 10 seconds.`, 'zhc:fp400');
+                }
             }
             for (const cluster of [0xfc0a, 0xfc0c]) {
                 try {
