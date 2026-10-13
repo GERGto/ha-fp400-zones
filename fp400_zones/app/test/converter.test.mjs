@@ -140,7 +140,14 @@ test('native transfer sends plain IDs and verifies a nonempty wrapped ZCL zone t
     const sent = [];
     const ep = {command: async (cluster, command, data) => sent.push({command, bytes: Buffer.from(Object.values(data))}),
         read: async () => ({zones: [[{elmType: 0x20, elmVal: 2}, {elmType: 0x30, elmVal: 0}, {elmType: 0x41, elmVal: Buffer.from(cells, 'hex')}, {elmType: 0x10, elmVal: 1}]]})};
-    const result = await nativeZones(ep, layout, 'write');
+    const delayWrites = [];
+    const device = {getEndpoint: (id) => ({write: async (cluster, attrs) => delayWrites.push([id, cluster, attrs[3]]), read: async () => ({3: 0})})};
+    const result = await nativeZones(ep, layout, 'write', device);
+    assert.equal(delayWrites.length, 1);
+    assert.equal(delayWrites[0][0], 4);
+    assert.equal(delayWrites[0][1], 'msOccupancySensing');
+    assert.equal(delayWrites[0][2].value, 0);
+    assert.equal(delayWrites[0][2].type, 0x21);
     assert.equal(result.native_sync, 'verified');
     assert.equal(sent.length, 9);
     for (let i = 0; i < 8; i++) { assert.equal(sent[i].command, 'removeZonePlain'); assert.deepEqual([...sent[i].bytes], [i + 1]); }
@@ -150,4 +157,35 @@ test('native transfer sends plain IDs and verifies a nonempty wrapped ZCL zone t
     const failure = await nativeZones(ep, layout, 'write');
     assert.equal(failure.native_sync, 'mismatch');
     assert.match(failure.native_errors, /requested 1, received 0/);
+});
+
+test('saving sets all eight zone timeouts and fails on rejected or missing confirmation', async () => {
+    const {tzFp400, ATTR} = load();
+    const cells = '80' + '00'.repeat(39);
+    const zones = Array.from({length: 8}, (_, i) => ({id: i + 1, cells, enabled: true, delay: 5}));
+    const writes = [];
+    const masks = new Map();
+    let mode = 'ok';
+    const control = {command: async () => {}, write: async (cluster, attrs) => {
+        for (const [key, item] of Object.entries(attrs)) masks.set(Number(key), item.value);
+    }, read: async (cluster, names) => names[0] === 'zones' ? {zones: zones.map(z => [
+        {elmVal: z.id}, {elmVal: 0}, {elmVal: Buffer.from(cells, 'hex')}, {elmVal: 1},
+    ])} : {[names[0]]: masks.get(ATTR[names[0]])}};
+    const device = {getEndpoint: id => id === 1 ? control : {
+        write: async (cluster, attrs) => {
+            assert.equal(cluster, 'msOccupancySensing');
+            assert.equal(attrs[3].value, 0);
+            writes.push(id);
+            if (mode === 'reject' && id === 6) throw new Error('Rejected');
+        },
+        read: async () => id === 6 && mode === 'missing' ? {} : {3: id === 6 && mode === 'mismatch' ? 10 : 0},
+    }};
+    for (mode of ['ok', 'reject', 'missing', 'mismatch']) {
+        writes.length = 0;
+        const result = (await tzFp400.convertSet(null, 'sensor_layout', {request: mode, layout: {zones}}, {device})).state;
+        assert.equal(result.layout_request, mode);
+        assert.equal(result.layout_status, mode === 'ok' ? 'verified' : 'failed');
+        assert.deepEqual(writes, [3, 4, 5, 6, 7, 8, 9, 10]);
+        if (mode !== 'ok') assert.match(result.layout_error, /Zone 4 absence confirmation/);
+    }
 });

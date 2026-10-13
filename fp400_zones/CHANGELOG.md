@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## 1.2.4
+
+- Every zone transferred to the sensor now receives a 0-second absence confirmation time automatically, including when an existing layout is saved again.
+- Each setting is read back from its zone endpoint. A rejected write or missing/mismatched confirmation fails the save instead of reporting success.
+- Global room presence and the 10-second polling fallback remain unchanged.
+- Converter version 1.3.3. After upgrading, start the app and save each existing room once to apply the setting.
+
 ## 1.2.3
 
 - Handle the FP400's limited reporting table without aborting setup of later zones.

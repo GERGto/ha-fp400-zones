@@ -20,7 +20,7 @@ Use the **Zones** and **Obstacles** tabs in the same room editor. Create up to e
 
 Under Obstacles, choose Exclusion (ignored space), Interference (moving objects), or Entry / exit (doorways). Draw the area on the same map using Draw, Rectangle and Erase. Clear selected area empties that mask in the draft. The map's area selector lets phone users switch areas without scrolling back to the list.
 
-**Save changes** transfers all zones AND all obstacle masks to the sensor. It replaces the sensor's zone layout and waits for matching readback before reporting success. Do not close the page while saving. If saving fails, the draft remains unsaved; the sensor may be partly changed. Retry by saving the complete layout again. Export downloads the draft JSON.
+**Save changes** transfers all zones AND all obstacle masks to the sensor. It replaces the sensor's zone layout and automatically sets each transferred zone's absence confirmation time to **0 seconds**, including on subsequent saves. Both the layout and every zone's 0-second setting must read back correctly before reporting success. Do not close the page while saving. If saving fails, the draft remains unsaved; the sensor may be partly changed. Retry by saving the complete layout again. Export downloads the draft JSON.
 
 Zigbee2MQTT shows saved zone names as labels while preserving zone_1 through zone_8 MQTT keys. The app requests an expose refresh after a saved layout changes. Reload the Zigbee2MQTT device page if it remains open with old labels. Home Assistant names manually overridden by the user are not renamed by this app.
 
@@ -36,7 +36,7 @@ Dashboard signal bars use the last reported Zigbee2MQTT linkquality value. Focus
 
 Some FP400 firmware accepts only five reporting entries. Global presence and illuminance use two, leaving three for immediate zone reports. The converter reads enabled, saved zones without reporting every 10 seconds. These values still come directly from the sensor. A polling cycle adds up to roughly 10 seconds in normal operation; Zigbee delays and retry backoff can increase this. Failed reads are retried after 60 seconds. Restart Zigbee2MQTT after upgrading to 1.2.3 so the polling lifecycle starts.
 
-The sensor can delay reporting a zone clear through its own absence confirmation setting. The app does not apply a further occupancy hold timer. Multiple radar tracks can temporarily represent one person; stationary tracks are not automatically discarded because a real person may be sitting still. Neither behavior is corrected by the reporting fallback.
+Since 1.2.4, saving sets each transferred zone's absence confirmation to 0 seconds. Save existing rooms once after upgrading to apply this automatically. This does not change the separate global room presence timeout or eliminate sensor processing and polling delays. The app does not apply a further occupancy hold timer. Multiple radar tracks can temporarily represent one person; stationary tracks are not automatically discarded because a real person may be sitting still. Neither behavior is corrected by the reporting fallback.
 
 ## Appearance and diagnostics
 

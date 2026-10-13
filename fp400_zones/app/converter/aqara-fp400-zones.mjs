@@ -24,7 +24,7 @@ import {logger} from 'zigbee-herdsman-converters/lib/logger';
 const e = exposes.presets;
 const ea = exposes.access;
 
-const CONVERTER_VERSION = '1.3.2';
+const CONVERTER_VERSION = '1.3.3';
 const MFR = 0x115f;
 const MO = {manufacturerCode: MFR};
 const GRID_COLS = 16;
@@ -353,7 +353,7 @@ async function readNativeZones(ep) {
     }
 }
 
-async function nativeZones(ep, layout, action) {
+async function nativeZones(ep, layout, action, device) {
     const errors = [];
     const send = async (cmd, buf) => {
         try {
@@ -380,6 +380,21 @@ async function nativeZones(ep, layout, action) {
             const ok = errors.length === 0 && back.length === wanted.length && wanted.every((z) => back.some((b) => b.id === z.id && b.cells === z.mask.toString('hex') && b.enabled === z.enabled));
             sync = ok ? 'verified' : 'mismatch';
             if (!ok && !errors.length) errors.push('Zone readback mismatch: requested ' + wanted.length + ', received ' + back.length + '. Sensor did not confirm identical IDs, masks and enabled flags.');
+        }
+    }
+    if (action === 'write' && sync === 'verified') {
+        for (const zone of wanted) {
+            try {
+                const endpoint = device?.getEndpoint(zone.id + 2);
+                if (!endpoint) throw new Error('Sensor endpoint is missing');
+                // FP400 absence confirmation is UINT16 attribute 3, not the legacy PIR delay.
+                await endpoint.write('msOccupancySensing', {3: {value: 0, type: T.U16}});
+                const response = await endpoint.read('msOccupancySensing', [3]);
+                if (response?.[3] !== 0) throw new Error('Sensor did not confirm 0 seconds');
+            } catch (error) {
+                errors.push(`Zone ${zone.id} absence confirmation: ${error.message}`);
+                sync = 'mismatch';
+            }
         }
     }
     return {native_zones: Array.isArray(back) ? back.map((z) => ({id: z.id, enabled: z.enabled, cells: z.cells})) : [],
@@ -526,7 +541,7 @@ const tzFp400 = {
                 const request = value?.request;
                 if (typeof request !== 'string' || request.length > 80 || !value.layout) throw new Error('Invalid sensor layout request');
                 try {
-                    const result = await nativeZones(ep, parseLayout(value.layout), 'write');
+                    const result = await nativeZones(ep, parseLayout(value.layout), 'write', meta.device);
                     if (result.native_sync !== 'verified') throw new Error(result.native_errors || 'Native zone readback does not match the requested layout');
                     for (const [key, name] of Object.entries(REGIONS)) {
                         const short = key.replace('region_', '');
@@ -541,7 +556,7 @@ const tzFp400 = {
                 const [action] = String(value).split('_');
                 if (!['write', 'clear', 'read'].includes(action)) throw new Error('native_zones must be write, write_plain, clear, clear_plain or read');
                 const layout = parseLayout(meta.options?.fp400_layout);
-                return {state: await nativeZones(ep, layout, action)};
+                return {state: await nativeZones(ep, layout, action, meta.device)};
             }
         }
     },
