@@ -13,6 +13,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import mqtt from 'mqtt';
 import {WebSocketServer} from 'ws';
+import {redact, rememberSecret, sameOrigin, validRequest} from './security.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ADDON = Boolean(process.env.SUPERVISOR_TOKEN);
@@ -21,8 +22,9 @@ const OPTIONS = readJson(path.join(DATA_DIR, 'options.json')) ?? {};
 const PORT = Number(process.env.PORT || 8099);
 const BASE = String(OPTIONS.base_topic || process.env.BASE_TOPIC || 'zigbee2mqtt').replace(/\/+$/, '');
 const AUTO_SETUP = (OPTIONS.auto_setup ?? (process.env.AUTO_SETUP !== 'false')) !== false;
-const ALLOW_ALL = process.env.ALLOW_ALL === 'true' || !ADDON;
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
+for (const value of [process.env.SUPERVISOR_TOKEN, OPTIONS.mqtt_password, OPTIONS.mqtt_user,
+    process.env.MQTT_PASSWORD, process.env.MQTT_USER]) rememberSecret(value);
 
 const MODEL_ID = 'lumi.models.4447_8295';
 const OUR_MODEL = 'PS-S05D';
@@ -58,6 +60,7 @@ function persist() {
 
 const logLines = [];
 function log(level, msg) {
+    msg = redact(msg);
     const line = `${new Date().toISOString().slice(11, 19)} ${msg}`;
     console[level === 'error' ? 'error' : 'log'](`[${level}] ${msg}`);
     logLines.unshift(line);
@@ -232,7 +235,7 @@ async function mqttSettings() {
     if (OPTIONS.mqtt_url) return {url: OPTIONS.mqtt_url, username: OPTIONS.mqtt_user || undefined, password: OPTIONS.mqtt_password || undefined};
     if (process.env.MQTT_URL) return {url: process.env.MQTT_URL, username: process.env.MQTT_USER || undefined, password: process.env.MQTT_PASSWORD || undefined};
     if (ADDON) {
-        const res = await fetch('http://supervisor/services/mqtt', {headers: {Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`}});
+        const res = await fetch('http://supervisor/services/mqtt', {headers: {Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`}, signal: AbortSignal.timeout(10000)});
         const body = await res.json().catch(() => ({}));
         if (!res.ok || body.result !== 'ok') {
             throw new Error(`Kein MQTT-Dienst gefunden (${body.message ?? res.status}). Ist das Mosquitto-Broker-Add-on installiert?`);
@@ -248,23 +251,35 @@ async function connectMqtt() {
     try {
         cfg = await mqttSettings();
     } catch (err) {
-        S.mqtt = {status: 'error', error: err.message, url: null};
+        S.mqtt = {status: 'error', error: redact(err.message), url: null};
         log('error', err.message);
         setTimeout(connectMqtt, 15000);
         return;
     }
-    S.mqtt.url = cfg.url;
+    rememberSecret(cfg.username);
+    rememberSecret(cfg.password);
+    try {
+        const endpoint = new URL(cfg.url);
+        rememberSecret(decodeURIComponent(endpoint.username));
+        rememberSecret(decodeURIComponent(endpoint.password));
+        if (!['mqtt:', 'mqtts:', 'ws:', 'wss:'].includes(endpoint.protocol)) throw new Error('Unsupported protocol');
+    } catch {
+        S.mqtt = {status: 'error', error: 'Ungültige MQTT-URL', url: null};
+        log('error', S.mqtt.error);
+        return;
+    }
+    S.mqtt.url = 'MQTT';
     client = mqtt.connect(cfg.url, {username: cfg.username, password: cfg.password, reconnectPeriod: 5000, connectTimeout: 10000,
-        clientId: `fp400-zones-${crypto.randomBytes(3).toString('hex')}`, rejectUnauthorized: false});
+        clientId: `fp400-zones-${crypto.randomBytes(3).toString('hex')}`});
     client.on('connect', () => {
-        S.mqtt = {status: 'connected', error: null, url: cfg.url};
-        log('info', `MQTT verbunden (${cfg.url})`);
+        S.mqtt = {status: 'connected', error: null, url: 'MQTT'};
+        log('info', 'MQTT verbunden');
         client.subscribe([`${BASE}/bridge/state`, `${BASE}/bridge/info`, `${BASE}/bridge/devices`, `${BASE}/bridge/converters`, `${BASE}/bridge/response/#`]);
         for (const d of S.devices) client.subscribe(`${BASE}/${d.friendly_name}`);
     });
     client.on('error', (err) => {
         S.mqtt.status = 'error';
-        S.mqtt.error = err.message;
+        S.mqtt.error = redact(err.message);
         log('error', `MQTT: ${err.message}`);
     });
     client.on('close', () => {
@@ -336,7 +351,7 @@ function onMessage(topic, buf) {
     }
     if (topic.startsWith(`${BASE}/bridge/response/`)) {
         const p = msg && typeof msg === 'object' ? pending.get(msg.transaction) : null;
-        if (p) {
+        if (p && topic === `${BASE}/bridge/response/${p.topic}`) {
             clearTimeout(p.timer);
             pending.delete(msg.transaction);
             if (msg.status === 'ok') p.resolve(msg.data);
@@ -351,7 +366,7 @@ function onMessage(topic, buf) {
             const first = !S.lastTargets.has(device.ieee_address);
             S.lastTargets.set(device.ieee_address, Date.now());
             if (first) {
-                log('info', `${device.friendly_name}: Positionen kommen an`);
+                log('info', 'FP400: Positionen kommen an');
                 scheduleBroadcast();
             }
         }
@@ -372,7 +387,7 @@ async function runAction(key, fn) {
         S.failures.delete(key);
         return result;
     } catch (err) {
-        S.lastError = {op: key, message: err.message};
+        S.lastError = {op: key, message: redact(err.message)};
         S.failures.set(key, Date.now());
         log('error', err.message);
         throw err;
@@ -424,18 +439,19 @@ const actions = {
         const d = S.devices.find((x) => x.ieee_address === ieee);
         if (!d) throw new Error('Gerät nicht gefunden');
         return runAction(`configure:${ieee}`, async () => {
-            log('info', `Konfiguriere ${d.friendly_name} …`);
+            log('info', 'Konfiguriere FP400 …');
             await z2mRequest('device/configure', {id: ieee}, 90000);
             persisted.configured[ieee] = CONVERTER_VERSION;
             persist();
-            log('info', `${d.friendly_name} konfiguriert`);
+            log('info', 'FP400 konfiguriert');
         });
     },
     async saveLayout({ieee, layout}) {
+        if (!S.devices.some((d) => d.ieee_address === ieee)) throw new Error('Gerät nicht gefunden');
         if (!layout || typeof layout !== 'object' || !Array.isArray(layout.zones)) throw new Error('Ungültiges Layout');
+        await z2mRequest('device/options', {id: ieee, options: {fp400_layout: JSON.stringify(layout)}});
         persisted.layouts[ieee] = layout;
         persist();
-        await z2mRequest('device/options', {id: ieee, options: {fp400_layout: JSON.stringify(layout)}});
         log('info', 'Layout gespeichert');
     },
     async set({ieee, payload}) {
@@ -504,9 +520,9 @@ function broadcast(obj) {
 }
 
 function allowed(req) {
-    if (ALLOW_ALL) return true;
+    if (!ADDON) return true;
     const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
-    return ip === '172.30.32.2' || ip === '127.0.0.1' || ip === '::1';
+    return ip === '172.30.32.2';
 }
 
 const STATIC = {
@@ -544,10 +560,10 @@ const server = http.createServer((req, res) => {
     });
 });
 
-const wss = new WebSocketServer({noServer: true});
+const wss = new WebSocketServer({noServer: true, maxPayload: 64 * 1024});
 server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://x');
-    if (!allowed(req) || !url.pathname.endsWith('/ws')) {
+    if (!allowed(req) || (!ADDON && !sameOrigin(req)) || url.pathname !== '/ws') {
         socket.destroy();
         return;
     }
@@ -559,11 +575,16 @@ wss.on('connection', (ws) => {
     ws.send(JSON.stringify(snapshot()));
     for (const [ieee, state] of S.states) ws.send(JSON.stringify({type: 'state', ieee, state}));
     ws.on('close', () => sockets.delete(ws));
+    ws.on('error', () => { sockets.delete(ws); ws.terminate(); });
     ws.on('message', async (data) => {
         let req;
         try {
             req = JSON.parse(data.toString());
         } catch {
+            return;
+        }
+        if (!validRequest(req, actions)) {
+            ws.send(JSON.stringify({type: 'result', id: req?.id ?? null, ok: false, error: 'Ungültige Anfrage'}));
             return;
         }
         const fn = actions[req.op];
@@ -573,13 +594,13 @@ wss.on('connection', (ws) => {
             const data = await fn(req);
             reply({ok: true, data: data ?? null});
         } catch (err) {
-            reply({ok: false, error: err.message});
+            reply({ok: false, error: redact(err.message)});
         }
     });
 });
 
 server.listen(PORT, () => {
-    log('info', `FP400 Zonen v${CONVERTER_VERSION} läuft auf Port ${PORT} (${ADDON ? 'Home-Assistant-App' : 'Standalone'}), Basis-Topic ${BASE}`);
+    log('info', `FP400 Zonen v${CONVERTER_VERSION} läuft auf Port ${server.address().port} (${ADDON ? 'Home-Assistant-App' : 'Standalone'})`);
     connectMqtt();
 });
 

@@ -676,11 +676,11 @@
     const rows = [
       ['Präsenz', live.presence === undefined || live.presence === null ? '–' : live.presence ? 'ja' : 'nein'],
       ['Personen', live.count ?? '–'],
-      ['Belegt', occ.length ? occ.map(esc).join(', ') : '–'],
+      ['Belegt', occ.length ? occ.join(', ') : '–'],
       ['Helligkeit', lastState.illuminance !== undefined ? lastState.illuminance + ' lx' : '–'],
       ['Ziele', live.targets.map((t) => `#${t.id} ${(t.x / 100).toFixed(2)}/${(t.y / 100).toFixed(2)} m`).join('  ') || '–'],
     ];
-    $('stateTable').innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+    $('stateTable').innerHTML = rows.map(([a, b]) => `<tr><td>${esc(a)}</td><td>${esc(b)}</td></tr>`).join('');
     $('liveLine').textContent = live.count != null ? `${live.count} Person(en)${occ.length ? ' · ' + occ.join(', ') : ''}` : '';
   }
 

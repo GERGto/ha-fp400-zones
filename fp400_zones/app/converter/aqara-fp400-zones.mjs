@@ -101,7 +101,7 @@ const clusterLocation = {
 };
 
 // ---------------------------------------------------------------------------------------------------------------
-// Helpers (exported for tests)
+// Protocol helpers
 
 function hexToMask(value) {
     if (value === '' || value === 'clear' || value == null) return Buffer.alloc(MASK_BYTES);
@@ -254,8 +254,10 @@ function parseLayout(raw) {
     } catch {
         doc = {};
     }
+    if (!doc || typeof doc !== 'object') doc = {};
     const zones = [];
     for (const z of Array.isArray(doc.zones) ? doc.zones : []) {
+        if (!z || typeof z !== 'object') continue;
         const id = Number(z.id);
         if (!Number.isInteger(id) || id < 1 || id > MAX_ZONES) continue;
         let mask;

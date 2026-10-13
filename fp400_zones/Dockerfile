@@ -4,6 +4,7 @@ WORKDIR /app
 COPY app/package.json app/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY app/server.mjs ./
+COPY app/security.mjs ./
 COPY app/converter ./converter
 COPY app/public ./public
 
