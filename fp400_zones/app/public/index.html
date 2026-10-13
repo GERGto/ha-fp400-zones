@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FP400 Zonen</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c232d; --line: #2a3340; --text: #e6edf3; --muted: #8b98a8;
+    --accent: #3fb950; --warn: #d29922; --err: #f85149; --grid: #222b36; --grid-strong: #33404f;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  .pill { font: 12px var(--mono); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.ok { color: var(--accent); border-color: #2a5a35; }
+  .pill.warn { color: var(--warn); border-color: #5a4a20; }
+  .pill.err { color: var(--err); border-color: #5a2a2a; }
+  .spacer { flex: 1; }
+  main { display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; gap: 0; min-height: calc(100vh - 50px); }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  aside, section { padding: 14px 16px; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); }
+  aside.right { border-right: 0; border-left: 1px solid var(--line); }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
+  h2:first-child { margin-top: 0; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 3px; }
+  input, select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+  input[type=checkbox] { width: auto; }
+  input:focus, select:focus { outline: 2px solid #1f6feb; outline-offset: -1px; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #46556a; }
+  button.primary { background: #238636; border-color: #2ea043; }
+  button.primary:hover { background: #2ea043; }
+  button.danger { color: var(--err); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > * { flex: 1; }
+  .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .hint.err { color: var(--err); }
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .toolbar { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .toolbar button.on { border-color: #1f6feb; background: #13233a; }
+  .layers { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 720px; }
+  .layer { display: flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; font-size: 13px; user-select: none; }
+  .layer.on { border-color: var(--text); background: var(--panel2); }
+  .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  canvas { touch-action: none; cursor: crosshair; border-radius: 8px; background: #0b0e13; border: 1px solid var(--line); max-width: 100%; }
+  .readout { font: 12px var(--mono); color: var(--muted); min-height: 16px; }
+  .zone { display: grid; grid-template-columns: 14px 1fr 58px 26px; gap: 6px; align-items: center; padding: 6px; border-radius: 6px; border: 1px solid transparent; }
+  .zone.active { border-color: var(--line); background: var(--panel2); }
+  .zone.occ { box-shadow: inset 3px 0 0 var(--accent); }
+  .zone input[type=text] { padding: 4px 6px; }
+  .zone input[type=number] { padding: 4px 6px; }
+  .zone .meta { grid-column: 2 / 5; font: 11px var(--mono); color: var(--muted); display: flex; gap: 10px; align-items: center; }
+  .zone .meta label { display: inline-flex; gap: 4px; align-items: center; margin: 0; }
+  .zone button { padding: 2px 6px; }
+  .state { font: 12px var(--mono); }
+  .state td { padding: 1px 8px 1px 0; color: var(--muted); }
+  .state td:last-child { color: var(--text); }
+  details { margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+  details summary { cursor: pointer; color: var(--warn); font-size: 13px; }
+  .setup { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .st { display: grid; grid-template-columns: 20px 1fr; gap: 8px; padding: 7px 8px; border-radius: 6px; align-items: start; }
+  .st b { font-weight: 600; font-size: 13px; }
+  .st .d { font-size: 12px; color: var(--muted); margin-top: 1px; overflow-wrap: anywhere; }
+  .st button { margin-top: 6px; padding: 4px 10px; font-size: 13px; }
+  .st.todo, .st.error { background: var(--panel2); }
+  .st .ic { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; margin-top: 1px; }
+  .st.ok .ic { background: #1f3d27; color: var(--accent); }
+  .st.ok .ic::before { content: "✓"; }
+  .st.todo .ic { background: #3d3214; color: var(--warn); }
+  .st.todo .ic::before { content: "!"; }
+  .st.error .ic { background: #3d1c1c; color: var(--err); }
+  .st.error .ic::before { content: "✕"; }
+  .st.wait .ic { border: 2px dotted var(--muted); }
+  .st.busy .ic { border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .st.busy .ic { animation: none; } }
+  .banner { max-width: 720px; width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid #5a4a20; background: #2a2412; color: #e3c46b; font-size: 13px; }
+  .log { font: 11px var(--mono); color: var(--muted); max-height: 120px; overflow: auto; white-space: pre-wrap; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FP400 Zonen</h1>
+  <span id="connPill" class="pill">verbinde …</span>
+  <span id="devPill" class="pill">kein Gerät</span>
+  <span id="dirtyPill" class="pill" hidden>ungespeichert</span>
+  <span class="spacer"></span>
+  <span class="readout" id="liveLine"></span>
+</header>
+<main>
+  <aside>
+    <h2>Einrichtung</h2>
+    <ol class="setup" id="setup"><li class="st busy"><span class="ic" aria-hidden="true"></span><div><b>Verbinde mit der App …</b></div></li></ol>
+    <div class="hint" id="setupHint"></div>
+
+    <h2>Gerät</h2>
+    <select id="device"><option value="">– warte auf Zigbee2MQTT –</option></select>
+
+    <h2>Montage</h2>
+    <div class="row">
+      <div><label for="mount">Art</label>
+        <select id="mount"><option value="wall">Wand</option><option value="ceiling">Decke</option></select></div>
+      <div><label for="side">Position</label>
+        <select id="side"><option value="wall">gerade Wand</option><option value="left_corner">linke Ecke</option><option value="right_corner">rechte Ecke</option></select></div>
+    </div>
+    <label for="height">Höhe (mm)</label>
+    <input id="height" type="number" min="0" max="5000" step="10" placeholder="z. B. 2000">
+    <div class="btns">
+      <button id="mountBtn">Montage schreiben</button>
+      <button id="learnBtn" title="Raum muss leer sein">Hintergrund lernen</button>
+    </div>
+    <div class="hint" id="learnHint"></div>
+
+    <h2>Anzeige</h2>
+    <label><input type="checkbox" id="mirror"> horizontal spiegeln</label>
+    <label><input type="checkbox" id="trails" checked> Spuren zeigen</label>
+    <label for="interval">Positions-Update (ms, 0 = jedes Paket, -1 = aus)</label>
+    <input id="interval" type="number" value="1000" step="100">
+    <div class="btns"><button id="demoBtn" title="Simulierte Personen, ohne Sensor">Demo</button></div>
+  </aside>
+
+  <section class="stage">
+    <div class="banner" id="setupBanner" hidden>Die Einrichtung ist noch nicht abgeschlossen (siehe links). Zeichnen kannst du trotzdem schon.</div>
+    <div class="layers" id="layers"></div>
+    <div class="toolbar">
+      <button id="toolPaint" class="on" title="Malen (B)">✎ Malen</button>
+      <button id="toolRect" title="Rechteck (R)">▭ Rechteck</button>
+      <button id="toolErase" title="Radieren (E) – Rechtsklick radiert immer">⌫ Radieren</button>
+      <button id="clearLayer">Ebene leeren</button>
+      <button id="undoBtn" title="Strg+Z">↶ Rückgängig</button>
+    </div>
+    <canvas id="grid" width="560" height="760"></canvas>
+    <div class="readout" id="hover">&nbsp;</div>
+  </section>
+
+  <aside class="right">
+    <h2>Zonen</h2>
+    <div id="zoneList"></div>
+    <div class="btns">
+      <button class="primary" id="saveBtn">Layout speichern</button>
+      <button id="maskBtn" title="Ausschluss, Störquellen und Ein-/Ausgang auf den Sensor schreiben">Masken schreiben</button>
+    </div>
+    <div class="hint" id="saveHint">Speichert in die Z2M-Geräteoptionen (configuration.yaml). Die Software-Zonen gelten sofort.</div>
+    <div class="btns">
+      <button id="exportBtn">Export</button>
+      <button id="importBtn">Import</button>
+      <input type="file" id="importFile" accept="application/json" hidden>
+    </div>
+
+    <details>
+      <summary>Experimentell: Zonen nativ auf den Sensor</summary>
+      <div class="hint">Schreibt die Zonen per appendZone/removeZone (Cluster 0xFC0A) und liest sie zurück. Das Byte-Format ist aus dem Matter-Modell abgeleitet und noch nicht bestätigt. Erscheint „verified“, sind sie im Gerät.</div>
+      <label for="encoding">Kodierung</label>
+      <select id="encoding"><option value="">typisiert (Standard)</option><option value="_plain">roh</option></select>
+      <div class="btns">
+        <button id="nativeWrite">Schreiben</button>
+        <button id="nativeRead">Zurücklesen</button>
+        <button id="nativeClear" class="danger">Alle löschen</button>
+      </div>
+      <div class="hint" id="nativeHint"></div>
+    </details>
+
+    <h2>Live</h2>
+    <table class="state" id="stateTable"></table>
+    <div class="log" id="log"></div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  'use strict';
+  const COLS = 16, ROWS = 20, MASK = 40, CELL_CM = 50, ZONES = 8;
+  const ZONE_COLORS = ['#38bdf8', '#f472b6', '#facc15', '#34d399', '#a78bfa', '#fb923c', '#f87171', '#e2e8f0'];
+  const REGION_DEFS = {
+    monitoring: {label: 'Ausschluss', color: '#9aa4b2', key: 'region_monitoring', title: 'Zellen, die der Sensor ignoriert'},
+    interference: {label: 'Störquelle', color: '#d29922', key: 'region_interference', title: 'Ventilator, Vorhang, Pflanze …'},
+    entry_exit: {label: 'Ein-/Ausgang', color: '#22d3ee', key: 'region_entry_exit', title: 'Türen, Durchgänge'},
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('fp400.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem('fp400.' + k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
+  };
+
+  // ---------- model ----------
+  const newMask = () => new Uint8Array(MASK);
+  const getBit = (m, bit) => (m[bit >> 3] & (0x80 >> (bit & 7))) !== 0;
+  const setBit = (m, bit, on) => { if (on) m[bit >> 3] |= 0x80 >> (bit & 7); else m[bit >> 3] &= ~(0x80 >> (bit & 7)); };
+  const toHex = (m) => Array.from(m, (b) => b.toString(16).padStart(2, '0')).join('');
+  const fromHex = (h) => { const m = newMask(); if (typeof h === 'string' && /^[0-9a-f]{80}$/i.test(h)) for (let i = 0; i < MASK; i++) m[i] = parseInt(h.substr(i * 2, 2), 16); return m; };
+  const count = (m) => { let n = 0; for (let b = 0; b < COLS * ROWS; b++) if (getBit(m, b)) n++; return n; };
+
+  const model = {
+    zones: Array.from({length: ZONES}, (_, i) => ({id: i + 1, name: `Zone ${i + 1}`, enabled: true, delay: 5, mask: newMask()})),
+    regions: {monitoring: newMask(), interference: newMask(), entry_exit: newMask()},
+  };
+  let activeLayer = 'z1';
+  let tool = 'paint';
+  let dirty = false;
+  const undoStack = [];
+
+  const layerMask = (layer) => layer.startsWith('z') ? model.zones[Number(layer.slice(1)) - 1].mask : model.regions[layer];
+
+  function toLayout() {
+    return {
+      version: 1,
+      targets_interval: Number($('interval').value),
+      zones: model.zones.filter((z) => count(z.mask) > 0 || z.name !== `Zone ${z.id}`)
+        .map((z) => ({id: z.id, name: z.name, enabled: z.enabled, delay: z.delay, cells: toHex(z.mask)})),
+      regions: Object.fromEntries(Object.entries(model.regions).map(([k, m]) => [k, toHex(m)])),
+    };
+  }
+
+  function fromLayout(doc, {keepRegions = false} = {}) {
+    if (!doc || typeof doc !== 'object') return;
+    for (const z of model.zones) { z.name = `Zone ${z.id}`; z.enabled = true; z.delay = 5; z.mask = newMask(); }
+    for (const z of doc.zones || []) {
+      const zone = model.zones[Number(z.id) - 1];
+      if (!zone) continue;
+      zone.name = String(z.name ?? zone.name);
+      zone.enabled = z.enabled !== false;
+      zone.delay = Math.max(0, Number(z.delay) || 0);
+      zone.mask = fromHex(z.cells);
+    }
+    if (!keepRegions && doc.regions) for (const k of Object.keys(model.regions)) model.regions[k] = fromHex(doc.regions[k]);
+    if (doc.targets_interval !== undefined) $('interval').value = doc.targets_interval;
+    renderZones(); draw();
+  }
+
+  function markDirty(on = true) {
+    dirty = on;
+    $('dirtyPill').hidden = !on;
+    store.set('draft', toLayout());
+  }
+
+  function pushUndo() {
+    undoStack.push(JSON.stringify(toLayout()));
+    if (undoStack.length > 50) undoStack.shift();
+  }
+
+  // ---------- canvas geometry ----------
+  const cv = $('grid');
+  const ctx = cv.getContext('2d');
+  let cell = 34, padL = 34, padT = 14, padB = 54;
+
+  function resize() {
+    const avail = Math.min(cv.parentElement.clientWidth - 8, 720);
+    const byHeight = Math.floor((window.innerHeight - 190 - padT - padB) / ROWS);
+    cell = Math.max(16, Math.min(Math.floor((avail - padL - 14) / COLS), byHeight));
+    const dpr = window.devicePixelRatio || 1;
+    const w = padL + COLS * cell + 14, h = padT + ROWS * cell + padB;
+    cv.width = w * dpr; cv.height = h * dpr;
+    cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+  }
+
+  const mirrored = () => $('mirror').checked;
+  const screenCol = (col) => mirrored() ? col : COLS - 1 - col;
+  const cellX = (col) => padL + screenCol(col) * cell;
+  const cellY = (row) => padT + (ROWS - 1 - row) * cell;
+  const targetX = (x) => padL + (mirrored() ? 8 - x / CELL_CM : 8 + x / CELL_CM) * cell;
+  const targetY = (y) => padT + (ROWS - y / CELL_CM) * cell;
+
+  function pointToCell(ev) {
+    const r = cv.getBoundingClientRect();
+    const px = ev.clientX - r.left, py = ev.clientY - r.top;
+    const s = Math.floor((px - padL) / cell), v = Math.floor((py - padT) / cell);
+    if (s < 0 || s >= COLS || v < 0 || v >= ROWS) return null;
+    const col = mirrored() ? s : COLS - 1 - s;
+    const row = ROWS - 1 - v;
+    return {row, col, bit: row * COLS + col};
+  }
+
+  // ---------- drawing ----------
+  const hatch = {};
+  function pattern(color, kind) {
+    const key = color + kind;
+    if (hatch[key]) return hatch[key];
+    const p = document.createElement('canvas');
+    p.width = p.height = 8;
+    const c = p.getContext('2d');
+    c.strokeStyle = color; c.fillStyle = color; c.globalAlpha = .75;
+    if (kind === 'dots') { c.beginPath(); c.arc(4, 4, 1.4, 0, 7); c.fill(); }
+    else { c.lineWidth = 1.5; c.beginPath(); c.moveTo(-2, 10); c.lineTo(10, -2); c.stroke(); c.beginPath(); c.moveTo(-2, 2); c.lineTo(2, -2); c.stroke(); c.beginPath(); c.moveTo(6, 10); c.lineTo(10, 6); c.stroke(); }
+    hatch[key] = ctx.createPattern(p, 'repeat');
+    return hatch[key];
+  }
+
+  let rectPreview = null;
+  let live = {targets: [], trails: new Map(), zones: {}, presence: null, count: null};
+
+  function draw() {
+    const W = padL + COLS * cell + 14, H = padT + ROWS * cell + padB;
+    ctx.clearRect(0, 0, W, H);
+    // grid
+    ctx.fillStyle = '#0b0e13'; ctx.fillRect(padL, padT, COLS * cell, ROWS * cell);
+    // field of view (wall mount)
+    if ($('mount').value === 'wall') {
+      const sx = targetX(0), sy = padT + ROWS * cell;
+      const reach = ROWS * cell;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(padL, padT, COLS * cell, ROWS * cell); ctx.clip();
+      ctx.beginPath(); ctx.moveTo(sx, sy);
+      ctx.arc(sx, sy, reach * 1.05, -Math.PI / 2 - Math.PI / 3, -Math.PI / 2 + Math.PI / 3);
+      ctx.closePath(); ctx.fillStyle = 'rgba(63,185,80,.05)'; ctx.fill();
+      ctx.restore();
+    }
+    // regions
+    for (const [k, def] of Object.entries(REGION_DEFS)) {
+      const m = model.regions[k];
+      ctx.fillStyle = pattern(def.color, k === 'entry_exit' ? 'dots' : 'hatch');
+      for (let b = 0; b < COLS * ROWS; b++) if (getBit(m, b)) ctx.fillRect(cellX(b % COLS), cellY(Math.floor(b / COLS)), cell, cell);
+    }
+    // zones
+    for (const z of model.zones) {
+      const color = ZONE_COLORS[z.id - 1];
+      const active = activeLayer === 'z' + z.id;
+      const occ = live.zones[z.id];
+      ctx.globalAlpha = !z.enabled ? .12 : occ ? .62 : active ? .42 : .26;
+      ctx.fillStyle = color;
+      for (let b = 0; b < COLS * ROWS; b++) if (getBit(z.mask, b)) ctx.fillRect(cellX(b % COLS) + 1, cellY(Math.floor(b / COLS)) + 1, cell - 2, cell - 2);
+      ctx.globalAlpha = 1;
+      // outline + label
+      let minS = 99, minV = 99;
+      ctx.strokeStyle = color; ctx.lineWidth = active ? 2 : 1;
+      for (let b = 0; b < COLS * ROWS; b++) {
+        if (!getBit(z.mask, b)) continue;
+        const col = b % COLS, row = Math.floor(b / COLS);
+        const x = cellX(col), y = cellY(row);
+        const nb = (r, c) => r >= 0 && r < ROWS && c >= 0 && c < COLS && getBit(z.mask, r * COLS + c);
+        const left = mirrored() ? col - 1 : col + 1, right = mirrored() ? col + 1 : col - 1;
+        ctx.beginPath();
+        if (!nb(row + 1, col)) { ctx.moveTo(x, y); ctx.lineTo(x + cell, y); }
+        if (!nb(row - 1, col)) { ctx.moveTo(x, y + cell); ctx.lineTo(x + cell, y + cell); }
+        if (!nb(row, left)) { ctx.moveTo(x, y); ctx.lineTo(x, y + cell); }
+        if (!nb(row, right)) { ctx.moveTo(x + cell, y); ctx.lineTo(x + cell, y + cell); }
+        ctx.stroke();
+        const s = screenCol(col), v = ROWS - 1 - row;
+        if (v < minV || (v === minV && s < minS)) { minV = v; minS = s; }
+      }
+      if (minV < 99) {
+        ctx.font = '600 11px system-ui'; ctx.fillStyle = '#0b0e13';
+        const label = String(z.id);
+        ctx.fillStyle = color; ctx.fillText(label, padL + minS * cell + 4, padT + minV * cell + 12);
+      }
+    }
+    // grid lines
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid');
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= COLS; i++) { ctx.beginPath(); ctx.moveTo(padL + i * cell + .5, padT); ctx.lineTo(padL + i * cell + .5, padT + ROWS * cell); ctx.stroke(); }
+    for (let j = 0; j <= ROWS; j++) {
+      ctx.strokeStyle = j % 2 === 0 ? '#33404f' : '#222b36';
+      ctx.beginPath(); ctx.moveTo(padL, padT + j * cell + .5); ctx.lineTo(padL + COLS * cell, padT + j * cell + .5); ctx.stroke();
+    }
+    // axis labels (metres)
+    ctx.fillStyle = '#8b98a8'; ctx.font = '11px ui-monospace, Menlo, monospace'; ctx.textAlign = 'right';
+    for (let m = 0; m <= 10; m += 1) ctx.fillText(m + 'm', padL - 5, padT + (ROWS - m * 2) * cell + 4);
+    ctx.textAlign = 'center';
+    for (let m = -4; m <= 4; m += 2) ctx.fillText((m > 0 ? '+' : '') + m + 'm', targetX(m * 100), padT + ROWS * cell + 14);
+    ctx.textAlign = 'left';
+    // sensor
+    const sx = targetX(0), sy = padT + ROWS * cell + 26;
+    ctx.fillStyle = '#e6edf3'; ctx.beginPath(); ctx.roundRect(sx - 16, sy - 6, 32, 12, 4); ctx.fill();
+    ctx.fillStyle = '#8b98a8'; ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.fillText('FP400', sx, sy + 20); ctx.textAlign = 'left';
+    // rect preview
+    if (rectPreview) {
+      const {a, b} = rectPreview;
+      const s1 = Math.min(screenCol(a.col), screenCol(b.col)), s2 = Math.max(screenCol(a.col), screenCol(b.col));
+      const r1 = Math.min(a.row, b.row), r2 = Math.max(a.row, b.row);
+      ctx.setLineDash([4, 3]); ctx.strokeStyle = '#e6edf3'; ctx.lineWidth = 1.5;
+      ctx.strokeRect(padL + s1 * cell, cellY(r2), (s2 - s1 + 1) * cell, (r2 - r1 + 1) * cell);
+      ctx.setLineDash([]);
+    }
+    // trails + targets
+    if ($('trails').checked) {
+      for (const pts of live.trails.values()) {
+        ctx.strokeStyle = 'rgba(230,237,243,.35)'; ctx.lineWidth = 1.5; ctx.beginPath();
+        pts.forEach((p, i) => { const X = targetX(p.x), Y = targetY(p.y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+        ctx.stroke();
+      }
+    }
+    for (const t of live.targets) {
+      const X = targetX(t.x), Y = targetY(t.y);
+      ctx.fillStyle = 'rgba(63,185,80,.25)'; ctx.beginPath(); ctx.arc(X, Y, 13, 0, 7); ctx.fill();
+      ctx.fillStyle = '#3fb950'; ctx.beginPath(); ctx.arc(X, Y, 6, 0, 7); ctx.fill();
+      ctx.fillStyle = '#0b0e13'; ctx.font = '600 9px system-ui'; ctx.textAlign = 'center'; ctx.fillText(String(t.id), X, Y + 3); ctx.textAlign = 'left';
+    }
+  }
+
+  // ---------- painting ----------
+  let painting = null;
+  function applyCell(c, on) {
+    const m = layerMask(activeLayer);
+    if (getBit(m, c.bit) !== on) { setBit(m, c.bit, on); return true; }
+    return false;
+  }
+  cv.addEventListener('contextmenu', (e) => e.preventDefault());
+  cv.addEventListener('pointerdown', (e) => {
+    const c = pointToCell(e);
+    if (!c) return;
+    cv.setPointerCapture(e.pointerId);
+    pushUndo();
+    const erase = tool === 'erase' || e.button === 2;
+    if (tool === 'rect' && e.button !== 2) { painting = {mode: 'rect', on: true}; rectPreview = {a: c, b: c}; draw(); return; }
+    const on = !erase && !(tool === 'paint' && getBit(layerMask(activeLayer), c.bit) && e.altKey);
+    painting = {mode: 'brush', on};
+    if (applyCell(c, on)) { markDirty(); renderZoneCounts(); }
+    draw();
+  });
+  cv.addEventListener('pointermove', (e) => {
+    const c = pointToCell(e);
+    $('hover').textContent = c
+      ? `Zeile ${c.row} · Spalte ${c.col} · ${(c.row * 0.5).toFixed(1)}–${(c.row * 0.5 + .5).toFixed(1)} m entfernt, x ${((8 - c.col - 1) * 0.5).toFixed(1)}…${((8 - c.col) * 0.5).toFixed(1)} m`
+      : ' ';
+    if (!painting || !c) return;
+    if (painting.mode === 'rect') { rectPreview.b = c; draw(); return; }
+    if (applyCell(c, painting.on)) { markDirty(); renderZoneCounts(); draw(); }
+  });
+  const endPaint = () => {
+    if (painting?.mode === 'rect' && rectPreview) {
+      const {a, b} = rectPreview;
+      for (let r = Math.min(a.row, b.row); r <= Math.max(a.row, b.row); r++)
+        for (let c = Math.min(a.col, b.col); c <= Math.max(a.col, b.col); c++) applyCell({bit: r * COLS + c}, painting.on);
+      markDirty(); renderZoneCounts();
+    }
+    painting = null; rectPreview = null; draw();
+  };
+  cv.addEventListener('pointerup', endPaint);
+  cv.addEventListener('pointercancel', endPaint);
+
+  function setTool(t) {
+    tool = t;
+    for (const [id, name] of [['toolPaint', 'paint'], ['toolRect', 'rect'], ['toolErase', 'erase']]) $(id).classList.toggle('on', name === t);
+  }
+  $('toolPaint').onclick = () => setTool('paint');
+  $('toolRect').onclick = () => setTool('rect');
+  $('toolErase').onclick = () => setTool('erase');
+  $('clearLayer').onclick = () => { pushUndo(); layerMask(activeLayer).fill(0); markDirty(); renderZones(); draw(); };
+  function undo() {
+    const s = undoStack.pop();
+    if (!s) return;
+    fromLayout(JSON.parse(s));
+    markDirty();
+  }
+  $('undoBtn').onclick = undo;
+  document.addEventListener('keydown', (e) => {
+    if (e.target.matches('input, select')) return;
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
+    else if (e.key === 'b') setTool('paint');
+    else if (e.key === 'r') setTool('rect');
+    else if (e.key === 'e') setTool('erase');
+    else if (/^[1-8]$/.test(e.key)) selectLayer('z' + e.key);
+  });
+
+  // ---------- layers + zone list ----------
+  function selectLayer(l) { activeLayer = l; renderLayers(); renderZones(); draw(); }
+  function renderLayers() {
+    const el = $('layers');
+    el.innerHTML = '';
+    const add = (id, label, color, title, hatched) => {
+      const b = document.createElement('div');
+      b.className = 'layer' + (activeLayer === id ? ' on' : '');
+      b.title = title || '';
+      b.innerHTML = `<span class="sw" style="background:${hatched ? 'repeating-linear-gradient(45deg,' + color + ' 0 2px,transparent 2px 5px)' : color}"></span>${label}`;
+      b.onclick = () => selectLayer(id);
+      el.appendChild(b);
+    };
+    model.zones.forEach((z) => add('z' + z.id, String(z.id), ZONE_COLORS[z.id - 1], z.name));
+    for (const [k, d] of Object.entries(REGION_DEFS)) add(k, d.label, d.color, d.title, true);
+  }
+  function renderZones() {
+    const el = $('zoneList');
+    el.innerHTML = '';
+    for (const z of model.zones) {
+      const row = document.createElement('div');
+      row.className = 'zone' + (activeLayer === 'z' + z.id ? ' active' : '') + (live.zones[z.id] ? ' occ' : '');
+      row.dataset.id = z.id;
+      row.innerHTML = `
+        <span class="sw" style="background:${ZONE_COLORS[z.id - 1]}"></span>
+        <input type="text" value="${z.name.replace(/"/g, '&quot;')}" aria-label="Name Zone ${z.id}">
+        <input type="number" min="0" max="600" value="${z.delay}" title="Ausschaltverzögerung in Sekunden" aria-label="Verzögerung">
+        <button title="Ebene leeren" aria-label="Zone leeren">✕</button>
+        <div class="meta"><span>zone_${z.id}</span><span class="cnt">${count(z.mask)} Zellen</span>
+          <label><input type="checkbox" ${z.enabled ? 'checked' : ''}> aktiv</label>
+          <span class="occtext">${live.zones[z.id] === true ? '● belegt' : live.zones[z.id] === false ? '○ frei' : ''}</span></div>`;
+      const [name, delay, clr, en] = [row.querySelector('input[type=text]'), row.querySelector('input[type=number]'), row.querySelector('button'), row.querySelector('input[type=checkbox]')];
+      row.addEventListener('click', (e) => { if (e.target === row || e.target.classList.contains('sw')) selectLayer('z' + z.id); });
+      name.onfocus = () => { if (activeLayer !== 'z' + z.id) { activeLayer = 'z' + z.id; renderLayers(); draw(); el.querySelectorAll('.zone').forEach((r) => r.classList.toggle('active', r.dataset.id == z.id)); } };
+      name.oninput = () => { z.name = name.value; markDirty(); };
+      delay.oninput = () => { z.delay = Math.max(0, Number(delay.value) || 0); markDirty(); };
+      en.onchange = () => { z.enabled = en.checked; markDirty(); draw(); };
+      clr.onclick = () => { pushUndo(); z.mask = newMask(); markDirty(); renderZones(); draw(); };
+      el.appendChild(row);
+    }
+  }
+  function renderZoneCounts() {
+    for (const row of $('zoneList').children) {
+      const z = model.zones[row.dataset.id - 1];
+      row.querySelector('.cnt').textContent = count(z.mask) + ' Zellen';
+    }
+  }
+  function renderOccupancy() {
+    for (const row of $('zoneList').children) {
+      const v = live.zones[row.dataset.id];
+      row.classList.toggle('occ', v === true);
+      row.querySelector('.occtext').textContent = v === true ? '● belegt' : v === false ? '○ frei' : '';
+    }
+  }
+
+  // ---------- backend (WebSocket über Home-Assistant-Ingress) ----------
+  let ws = null;
+  let device = '';
+  let lastState = {};
+  let snap = null;
+  let reqId = 0;
+  let demoTimer = null;
+  let loadedLayoutKey = null;
+  const waiting = new Map();
+  const localLog = [];
+  const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+  const pill = (id, text, cls) => { const p = $(id); p.textContent = text; p.className = 'pill' + (cls ? ' ' + cls : ''); };
+  const log = (msg) => { localLog.unshift(`${new Date().toLocaleTimeString()} ${msg}`); localLog.length = Math.min(localLog.length, 10); renderLog(); };
+  function renderLog() { $('log').textContent = [...localLog, ...(snap?.log || [])].slice(0, 30).join('\n'); }
+
+  function wsUrl() {
+    let p = location.pathname.replace(/index\.html$/, '');
+    if (!p.endsWith('/')) p += '/';
+    return `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${p}ws`;
+  }
+
+  function connect() {
+    pill('connPill', 'verbinde …', 'warn');
+    ws = new WebSocket(wsUrl());
+    ws.onopen = () => pill('connPill', 'verbunden', 'ok');
+    ws.onclose = () => {
+      pill('connPill', 'getrennt – verbinde neu …', 'err');
+      for (const w of waiting.values()) w.reject(new Error('Verbindung zur App getrennt'));
+      waiting.clear();
+      setTimeout(connect, 2000);
+    };
+    ws.onmessage = (ev) => {
+      let m;
+      try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.type === 'snapshot') onSnapshot(m);
+      else if (m.type === 'state') { if (m.ieee === device && !demoTimer) onState(m.state); }
+      else if (m.type === 'result') {
+        const w = waiting.get(m.id);
+        if (w) { waiting.delete(m.id); if (m.ok) w.resolve(m.data); else w.reject(new Error(m.error)); }
+      }
+    };
+  }
+
+  function call(op, args = {}) {
+    return new Promise((resolve, reject) => {
+      if (!ws || ws.readyState !== 1) { reject(new Error('Keine Verbindung zur App')); return; }
+      const id = ++reqId;
+      waiting.set(id, {resolve, reject});
+      ws.send(JSON.stringify({id, op, ...args}));
+    });
+  }
+
+  function onSnapshot(m) {
+    snap = m;
+    renderSetup(m.steps);
+    $('setupBanner').hidden = m.ready;
+    fillDevices(m.devices);
+    renderLog();
+  }
+
+  function renderSetup(steps) {
+    const el = $('setup');
+    el.innerHTML = '';
+    for (const st of steps) {
+      const li = document.createElement('li');
+      li.className = 'st ' + st.status;
+      li.innerHTML = `<span class="ic" aria-hidden="true"></span><div><b>${esc(st.label)}</b>${st.detail ? `<div class="d">${esc(st.detail)}</div>` : ''}</div>`;
+      if (st.action) {
+        const btn = document.createElement('button');
+        btn.textContent = st.action.label;
+        if (!st.action.quiet) btn.className = 'primary';
+        btn.onclick = async () => {
+          if (st.action.confirm && !confirm(st.action.confirm)) return;
+          btn.disabled = true;
+          $('setupHint').className = 'hint'; $('setupHint').textContent = '';
+          try { await call(st.action.op, {ieee: st.action.ieee}); }
+          catch (err) { $('setupHint').className = 'hint err'; $('setupHint').textContent = err.message; btn.disabled = false; }
+        };
+        li.lastElementChild.appendChild(btn);
+      }
+      el.appendChild(li);
+    }
+  }
+
+  function fillDevices(list) {
+    const sel = $('device');
+    const keep = device || store.get('device', '');
+    const options = list.map((d) => `<option value="${esc(d.ieee)}">${esc(d.name)}</option>`).join('');
+    const html = list.length ? '<option value="">– Sensor wählen –</option>' + options : '<option value="">kein FP400 gefunden</option>';
+    if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
+    let pick = list.some((d) => d.ieee === keep) ? keep : list.length === 1 ? list[0].ieee : '';
+    sel.value = pick;
+    if (pick !== device) selectDevice(pick);
+    const cur = list.find((d) => d.ieee === device);
+    pill('devPill', cur ? cur.name : 'kein Sensor', cur ? 'ok' : '');
+    if (cur) maybeLoadLayout(cur);
+  }
+
+  function maybeLoadLayout(cur) {
+    if (!cur.layout) return;
+    const key = cur.ieee + JSON.stringify(cur.layout);
+    if (key === loadedLayoutKey || dirty) return;
+    loadedLayoutKey = key;
+    fromLayout(cur.layout, {keepRegions: true});
+    if (cur.source === 'backup') {
+      markDirty(true);
+      $('saveHint').className = 'hint err';
+      $('saveHint').textContent = 'Layout aus der Sicherung der App geladen – bitte speichern, damit Zigbee2MQTT es nutzt.';
+    } else {
+      markDirty(false);
+      log('Layout aus Zigbee2MQTT geladen');
+    }
+  }
+
+  function selectDevice(ieee) {
+    device = ieee;
+    store.set('device', ieee);
+    loadedLayoutKey = null;
+    live = {targets: [], trails: new Map(), zones: {}, presence: null, count: null};
+    renderOccupancy(); renderState(); draw();
+    if (!ieee) return;
+    call('get', {ieee, payload: {install_mode: '', side_install: '', install_height: '', region_monitoring: '', region_interference: '', region_entry_exit: ''}}).catch(() => {});
+  }
+  $('device').onchange = (e) => selectDevice(e.target.value);
+
+  function onState(s) {
+    lastState = s;
+    if (Array.isArray(s.targets)) setTargets(s.targets);
+    for (let i = 1; i <= ZONES; i++) if (typeof s[`zone_${i}`] === 'boolean') live.zones[i] = s[`zone_${i}`];
+    live.presence = s.presence; live.count = s.target_count;
+    if (s.install_mode && document.activeElement !== $('mount')) $('mount').value = s.install_mode;
+    if (s.side_install && document.activeElement !== $('side')) $('side').value = s.side_install;
+    if (s.install_height !== undefined && document.activeElement !== $('height')) $('height').value = s.install_height;
+    if (!dirty) for (const [k, d] of Object.entries(REGION_DEFS)) if (typeof s[d.key] === 'string') model.regions[k] = fromHex(s[d.key]);
+    if (s.background_learning_result) $('learnHint').textContent = 'Lernen: ' + s.background_learning_result;
+    if (s.native_sync) {
+      const ids = (s.native_zones || []).map((z) => z.id).join(', ') || '–';
+      $('nativeHint').className = 'hint' + (s.native_sync === 'verified' ? '' : ' err');
+      $('nativeHint').textContent = `Status: ${s.native_sync} · Zonen im Gerät: ${ids}${s.native_errors ? ' · ' + s.native_errors : ''}${s.native_zone_result ? ' · ' + s.native_zone_result : ''}`;
+    }
+    renderOccupancy(); renderState(); draw();
+  }
+
+  function setTargets(targets) {
+    live.targets = targets.filter((t) => Number.isFinite(t.x) && Number.isFinite(t.y));
+    const seen = new Set();
+    for (const t of live.targets) {
+      seen.add(t.id);
+      const tr = live.trails.get(t.id) || [];
+      tr.push({x: t.x, y: t.y});
+      if (tr.length > 40) tr.shift();
+      live.trails.set(t.id, tr);
+    }
+    for (const id of [...live.trails.keys()]) if (!seen.has(id)) live.trails.delete(id);
+  }
+
+  function renderState() {
+    const occ = Object.entries(live.zones).filter(([, v]) => v).map(([k]) => model.zones[k - 1].name);
+    const rows = [
+      ['Präsenz', live.presence === undefined || live.presence === null ? '–' : live.presence ? 'ja' : 'nein'],
+      ['Personen', live.count ?? '–'],
+      ['Belegt', occ.length ? occ.map(esc).join(', ') : '–'],
+      ['Helligkeit', lastState.illuminance !== undefined ? lastState.illuminance + ' lx' : '–'],
+      ['Ziele', live.targets.map((t) => `#${t.id} ${(t.x / 100).toFixed(2)}/${(t.y / 100).toFixed(2)} m`).join('  ') || '–'],
+    ];
+    $('stateTable').innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+    $('liveLine').textContent = live.count != null ? `${live.count} Person(en)${occ.length ? ' · ' + occ.join(', ') : ''}` : '';
+  }
+
+  const needDevice = (hintId = 'saveHint') => {
+    if (device) return true;
+    $(hintId).className = 'hint err';
+    $(hintId).textContent = 'Kein Sensor ausgewählt.';
+    return false;
+  };
+  const setDevice = (payload) => call('set', {ieee: device, payload}).catch((err) => log('Fehler: ' + err.message));
+
+  $('saveBtn').onclick = async () => {
+    if (!needDevice()) return;
+    $('saveHint').className = 'hint'; $('saveHint').textContent = 'Speichere …';
+    try {
+      const layout = toLayout();
+      await call('saveLayout', {ieee: device, layout});
+      loadedLayoutKey = device + JSON.stringify(layout);
+      markDirty(false);
+      $('saveHint').textContent = 'Gespeichert ✓ – Zonen sind aktiv.';
+    } catch (err) {
+      $('saveHint').className = 'hint err'; $('saveHint').textContent = 'Fehler: ' + err.message;
+    }
+  };
+  $('maskBtn').onclick = () => {
+    if (!needDevice()) return;
+    for (const [k, d] of Object.entries(REGION_DEFS)) setDevice({[d.key]: toHex(model.regions[k])});
+    log('Masken an Sensor gesendet (Z2M liest jede zur Kontrolle zurück)');
+  };
+  $('mountBtn').onclick = () => {
+    if (!needDevice('learnHint')) return;
+    setDevice({install_mode: $('mount').value});
+    if ($('mount').value === 'wall') setDevice({side_install: $('side').value});
+    if ($('height').value !== '') setDevice({install_height: Number($('height').value)});
+    log('Montage gesendet');
+  };
+  $('learnBtn').onclick = () => {
+    if (!needDevice('learnHint')) return;
+    if (!confirm('Hintergrund-Lernen starten? Der Raum muss dabei leer sein.')) return;
+    setDevice({background_learning: 'start'});
+    $('learnHint').textContent = 'Lernen läuft …';
+  };
+  const native = (action) => {
+    if (!needDevice('nativeHint')) return;
+    if (dirty && action !== 'read' && !confirm('Das Layout ist nicht gespeichert. Der Converter nutzt das gespeicherte Layout. Trotzdem fortfahren?')) return;
+    setDevice({native_zones: action + (action === 'read' ? '' : $('encoding').value)});
+    $('nativeHint').className = 'hint'; $('nativeHint').textContent = 'Läuft … (ca. 6 s)';
+  };
+  $('nativeWrite').onclick = () => native('write');
+  $('nativeRead').onclick = () => native('read');
+  $('nativeClear').onclick = () => { if (confirm('Alle nativen Zonen im Sensor löschen?')) native('clear'); };
+
+  $('exportBtn').onclick = () => {
+    const blob = new Blob([JSON.stringify(toLayout(), null, 2)], {type: 'application/json'});
+    const a = document.createElement('a');
+    const name = snap?.devices.find((d) => d.ieee === device)?.name || '';
+    a.href = URL.createObjectURL(blob); a.download = `fp400-layout${name ? '-' + name.replace(/[^\w-]+/g, '_') : ''}.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $('importBtn').onclick = () => $('importFile').click();
+  $('importFile').onchange = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try { pushUndo(); fromLayout(JSON.parse(await f.text())); markDirty(); } catch { alert('Keine gültige Layout-Datei.'); }
+    e.target.value = '';
+  };
+
+  for (const id of ['mirror', 'trails', 'mount']) $(id).addEventListener('change', draw);
+  $('mirror').addEventListener('change', () => store.set('mirror', $('mirror').checked));
+  $('interval').addEventListener('input', () => markDirty());
+  $('mirror').checked = store.get('mirror', false);
+
+  // ---------- demo ----------
+  function stopDemo() {
+    if (!demoTimer) return;
+    clearInterval(demoTimer); demoTimer = null; $('demoBtn').textContent = 'Demo';
+    live = {targets: [], trails: new Map(), zones: {}, presence: null, count: null};
+    renderOccupancy(); renderState(); draw();
+  }
+  $('demoBtn').onclick = () => {
+    if (demoTimer) return stopDemo();
+    $('demoBtn').textContent = 'Demo stoppen';
+    const t0 = performance.now();
+    demoTimer = setInterval(() => {
+      const t = (performance.now() - t0) / 1000;
+      const targets = [
+        {id: 0, x: Math.round(180 * Math.sin(t / 3.1)), y: Math.round(380 + 220 * Math.sin(t / 4.7))},
+        {id: 1, x: Math.round(-220 + 60 * Math.sin(t / 1.3)), y: Math.round(650 + 120 * Math.cos(t / 2.2))},
+      ].filter((p) => p.y > 0);
+      // same formula as the converter
+      const zones = {};
+      for (const z of model.zones) {
+        if (!z.enabled || !count(z.mask)) continue;
+        zones[z.id] = targets.some((p) => {
+          const row = Math.floor(p.y / CELL_CM), col = Math.floor(8 - p.x / CELL_CM);
+          return row >= 0 && row < ROWS && col >= 0 && col < COLS && getBit(z.mask, row * COLS + col);
+        });
+      }
+      const s = {presence: true, target_count: targets.length, targets};
+      for (const [k, v] of Object.entries(zones)) s[`zone_${k}`] = v;
+      live.zones = {};
+      onState(s);
+    }, 150);
+  };
+
+  connect();
+  // ---------- init ----------
+  const draft = store.get('draft');
+  if (draft) fromLayout(draft);
+  if (!draft || !draft.zones?.length) {
+    // starter example so the grid is not empty
+    const z = model.zones[0];
+    for (let r = 4; r <= 7; r++) for (let c = 6; c <= 9; c++) setBit(z.mask, r * COLS + c, true);
+    z.name = 'Sofa';
+  }
+  renderLayers(); renderZones(); renderState();
+  window.addEventListener('resize', resize);
+  resize();
+})();
+</script>
+</body>
+</html>

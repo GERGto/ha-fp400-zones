@@ -1,0 +1,5 @@
+node_modules/
+fp400_zones/app/data/
+.DS_Store
+*.log
+*.zip

@@ -1,0 +1,14 @@
+configuration:
+  base_topic:
+    name: Zigbee2MQTT Basis-Topic
+    description: Standard ist zigbee2mqtt. Nur ändern, wenn du in Z2M ein anderes base_topic eingestellt hast.
+  auto_setup:
+    name: Automatische Einrichtung
+    description: Converter automatisch installieren und aktualisieren und den Sensor konfigurieren.
+  mqtt_url:
+    name: MQTT-Server (optional)
+    description: Nur nötig, wenn du nicht das Mosquitto-Add-on nutzt, z. B. mqtt://192.168.1.10:1883
+  mqtt_user:
+    name: MQTT-Benutzer (optional)
+  mqtt_password:
+    name: MQTT-Passwort (optional)

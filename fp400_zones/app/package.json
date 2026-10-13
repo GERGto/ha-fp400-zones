@@ -1,0 +1,14 @@
+{
+  "name": "fp400-zones",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aqara FP400 Zonen für Zigbee2MQTT – Home-Assistant-App",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {"start": "node server.mjs"},
+  "engines": {"node": ">=20"},
+  "dependencies": {
+    "mqtt": "5.10.4",
+    "ws": "8.18.0"
+  }
+}
