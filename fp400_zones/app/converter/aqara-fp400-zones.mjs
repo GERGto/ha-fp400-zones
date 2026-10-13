@@ -24,7 +24,7 @@ import {logger} from 'zigbee-herdsman-converters/lib/logger';
 const e = exposes.presets;
 const ea = exposes.access;
 
-const CONVERTER_VERSION = '1.3.3';
+const CONVERTER_VERSION = '1.3.4';
 const MFR = 0x115f;
 const MO = {manufacturerCode: MFR};
 const GRID_COLS = 16;
@@ -383,16 +383,19 @@ async function nativeZones(ep, layout, action, device) {
         }
     }
     if (action === 'write' && sync === 'verified') {
-        for (const zone of wanted) {
+        // The global timeout can delay zone clearing even when each zone already uses 0 seconds.
+        const confirmations = [{endpoint: 1, label: 'Global presence'},
+            ...wanted.map((zone) => ({endpoint: zone.id + 2, label: `Zone ${zone.id}`}))];
+        for (const setting of confirmations) {
             try {
-                const endpoint = device?.getEndpoint(zone.id + 2);
+                const endpoint = device?.getEndpoint(setting.endpoint);
                 if (!endpoint) throw new Error('Sensor endpoint is missing');
                 // FP400 absence confirmation is UINT16 attribute 3, not the legacy PIR delay.
                 await endpoint.write('msOccupancySensing', {3: {value: 0, type: T.U16}});
                 const response = await endpoint.read('msOccupancySensing', [3]);
                 if (response?.[3] !== 0) throw new Error('Sensor did not confirm 0 seconds');
             } catch (error) {
-                errors.push(`Zone ${zone.id} absence confirmation: ${error.message}`);
+                errors.push(`${setting.label} absence confirmation: ${error.message}`);
                 sync = 'mismatch';
             }
         }

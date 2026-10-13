@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## 1.2.5
+
+- Saving a room now sets both global presence and every transferred zone's absence confirmation time to 0 seconds. The global timeout was observed to delay zone clearing even with per-zone timeouts set to zero.
+- Global and zone settings are read back individually; rejected writes or missing/mismatched confirmation fail the save.
+- Converter version 1.3.4. After upgrading, start the app and save each existing room once. The polling fallback for zones without reporting remains unchanged.
+
 ## 1.2.4
 
 - Every zone transferred to the sensor now receives a 0-second absence confirmation time automatically, including when an existing layout is saved again.

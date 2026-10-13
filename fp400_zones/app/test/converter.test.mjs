@@ -99,8 +99,9 @@ test('saving confirms all masks and correlates sensor failure without claiming s
     let fail = false;
     const ep = {command: async () => {}, write: async (cluster, attrs) => {
         if (fail) throw new Error('Sensor rejected mask');
+        if (cluster === 'msOccupancySensing') return;
         for (const [id, item] of Object.entries(attrs)) written.set(Number(id), item.value);
-    }, read: async (cluster, names) => names[0] === 'zones' ? {zones: []} : {[names[0]]: written.get(ATTR[names[0]])}};
+    }, read: async (cluster, names) => cluster === 'msOccupancySensing' ? {3: 0} : names[0] === 'zones' ? {zones: []} : {[names[0]]: written.get(ATTR[names[0]])}};
     const meta = {device: {getEndpoint: () => ep}};
     const value = {request: 'new-request', layout: {zones: [], regions: {monitoring: '80' + '00'.repeat(39)}}};
     const success = (await tzFp400.convertSet(null, 'sensor_layout', value, meta)).state;
@@ -143,8 +144,9 @@ test('native transfer sends plain IDs and verifies a nonempty wrapped ZCL zone t
     const delayWrites = [];
     const device = {getEndpoint: (id) => ({write: async (cluster, attrs) => delayWrites.push([id, cluster, attrs[3]]), read: async () => ({3: 0})})};
     const result = await nativeZones(ep, layout, 'write', device);
-    assert.equal(delayWrites.length, 1);
-    assert.equal(delayWrites[0][0], 4);
+    assert.equal(delayWrites.length, 2);
+    assert.equal(delayWrites[0][0], 1);
+    assert.equal(delayWrites[1][0], 4);
     assert.equal(delayWrites[0][1], 'msOccupancySensing');
     assert.equal(delayWrites[0][2].value, 0);
     assert.equal(delayWrites[0][2].type, 0x21);
@@ -159,7 +161,7 @@ test('native transfer sends plain IDs and verifies a nonempty wrapped ZCL zone t
     assert.match(failure.native_errors, /requested 1, received 0/);
 });
 
-test('saving sets all eight zone timeouts and fails on rejected or missing confirmation', async () => {
+test('saving verifies global and all eight zone timeouts, including failures', async () => {
     const {tzFp400, ATTR} = load();
     const cells = '80' + '00'.repeat(39);
     const zones = Array.from({length: 8}, (_, i) => ({id: i + 1, cells, enabled: true, delay: 5}));
@@ -167,8 +169,15 @@ test('saving sets all eight zone timeouts and fails on rejected or missing confi
     const masks = new Map();
     let mode = 'ok';
     const control = {command: async () => {}, write: async (cluster, attrs) => {
+        if (cluster === 'msOccupancySensing') {
+            assert.equal(attrs[3].value, 0); assert.equal(attrs[3].type, 0x21); writes.push(1);
+            if (mode === 'global-reject') throw new Error('Rejected');
+            return;
+        }
         for (const [key, item] of Object.entries(attrs)) masks.set(Number(key), item.value);
-    }, read: async (cluster, names) => names[0] === 'zones' ? {zones: zones.map(z => [
+    }, read: async (cluster, names) => cluster === 'msOccupancySensing'
+        ? (mode === 'global-missing' ? {} : {3: mode === 'global-mismatch' ? 10 : 0})
+        : names[0] === 'zones' ? {zones: zones.map(z => [
         {elmVal: z.id}, {elmVal: 0}, {elmVal: Buffer.from(cells, 'hex')}, {elmVal: 1},
     ])} : {[names[0]]: masks.get(ATTR[names[0]])}};
     const device = {getEndpoint: id => id === 1 ? control : {
@@ -180,12 +189,12 @@ test('saving sets all eight zone timeouts and fails on rejected or missing confi
         },
         read: async () => id === 6 && mode === 'missing' ? {} : {3: id === 6 && mode === 'mismatch' ? 10 : 0},
     }};
-    for (mode of ['ok', 'reject', 'missing', 'mismatch']) {
+    for (mode of ['ok', 'reject', 'missing', 'mismatch', 'global-reject', 'global-missing', 'global-mismatch']) {
         writes.length = 0;
         const result = (await tzFp400.convertSet(null, 'sensor_layout', {request: mode, layout: {zones}}, {device})).state;
         assert.equal(result.layout_request, mode);
         assert.equal(result.layout_status, mode === 'ok' ? 'verified' : 'failed');
-        assert.deepEqual(writes, [3, 4, 5, 6, 7, 8, 9, 10]);
-        if (mode !== 'ok') assert.match(result.layout_error, /Zone 4 absence confirmation/);
+        assert.deepEqual(writes, [1, 3, 4, 5, 6, 7, 8, 9, 10]);
+        if (mode !== 'ok') assert.match(result.layout_error, mode.startsWith('global-') ? /Global presence absence confirmation/ : /Zone 4 absence confirmation/);
     }
 });
