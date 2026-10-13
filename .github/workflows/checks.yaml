@@ -21,6 +21,10 @@ jobs:
         working-directory: fp400_zones/app
       - run: npm run check
         working-directory: fp400_zones/app
+      - run: npx playwright install --with-deps chromium
+        working-directory: fp400_zones/app
+      - run: npx playwright test
+        working-directory: fp400_zones/app
       - run: npm audit --omit=dev --audit-level=moderate
         working-directory: fp400_zones/app
   addon-lint:

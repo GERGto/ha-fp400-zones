@@ -12,7 +12,7 @@ function load() {
         .replace('export default {', 'const definition = {');
     const context = vm.createContext({Buffer, setTimeout, clearTimeout,
         m: builder, exposes: {presets: builder, access: {STATE: 1, SET: 2, ALL: 7}}});
-    vm.runInContext(`${code}\nglobalThis.helpers = {parseLayout, parseLocation, cellOf, evaluateZones, clearZones, rt};`, context);
+    vm.runInContext(`${code}\nglobalThis.helpers = {parseLayout, parseLocation, cellOf, evaluateZones, clearZones, rt, tzFp400, fzOccupancy};`, context);
     return context.helpers;
 }
 
@@ -21,6 +21,20 @@ test('malformed layouts cannot crash the converter', () => {
     for (const raw of ['null', '1', 'broken', '{"zones":[null,1,{}]}']) {
         assert.equal(parseLayout(raw).zones.length, 0);
     }
+});
+
+test('view subscriptions use a bounded expiry and native reports do not overwrite software zones', async () => {
+    const {tzFp400, fzOccupancy} = load();
+    const commands = [];
+    const device = {ieeeAddr: 'example-device', getEndpoint: () => ({command: async (...args) => commands.push(args)})};
+    await tzFp400.convertSet(null, 'location_subscribe', 60, {device});
+    assert.equal(commands[0][2].timeout, 60);
+    for (const value of [0, -1, 3601, 'bad']) await assert.rejects(tzFp400.convertSet(null, 'location_subscribe', value, {device}));
+    const msg = {data: {occupancy: 1}, endpoint: {ID: 3}, device};
+    assert.equal(fzOccupancy.convert(null, msg, () => {}, {}).zone_1, undefined);
+    assert.equal(fzOccupancy.convert(null, msg, () => {}, {fp400_zone_mode: 'native'}).zone_1, true);
+    msg.data.occupancy = 0;
+    assert.equal(fzOccupancy.convert(null, msg, () => {}, {fp400_zone_mode: 'native'}).zone_1, false);
 });
 
 test('grid boundaries and truncated location reports are handled', () => {

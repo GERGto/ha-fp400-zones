@@ -10,7 +10,7 @@ export default [
         rules: {'no-unused-vars': ['error', {args: 'none', caughtErrors: 'none'}]},
     },
     {
-        files: ['public/browser.js'],
+        files: ['public/*.js'],
         languageOptions: {globals: globals.browser},
         rules: {'no-unused-vars': ['error', {args: 'none', caughtErrors: 'none'}]},
     },

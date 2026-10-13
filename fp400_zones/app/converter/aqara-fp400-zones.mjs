@@ -23,7 +23,7 @@ import * as exposes from 'zigbee-herdsman-converters/lib/exposes';
 const e = exposes.presets;
 const ea = exposes.access;
 
-const CONVERTER_VERSION = '1.1.0';
+const CONVERTER_VERSION = '1.2.0';
 const MFR = 0x115f;
 const MO = {manufacturerCode: MFR};
 const GRID_COLS = 16;
@@ -402,11 +402,12 @@ async function nativeZones(ep, layout, action, encoding) {
         if (action === 'read') {
             sync = 'read';
         } else {
-            const ok = back.length === wanted.length && wanted.every((z) => back.some((b) => b.id === z.id && (b.cells === null || b.cells === z.mask.toString('hex'))));
+            const ok = errors.length === 0 && back.length === wanted.length && wanted.every((z) => back.some((b) => b.id === z.id && b.cells === z.mask.toString('hex') && b.enabled === z.enabled));
             sync = ok ? 'verified' : 'mismatch';
         }
     }
     return {native_zones: Array.isArray(back) ? back.map((z) => ({id: z.id, enabled: z.enabled, cells: z.cells})) : [],
+        native_layout: sync === 'verified' ? wanted.map((z) => `${z.id}:${z.mask.toString('hex')}`).sort().join('|') : null,
         native_sync: sync, native_errors: errors.length ? errors.slice(0, 4).join('; ') : (typeof back === 'string' ? back : null), native_encoding: typed ? 'typed' : 'plain'};
 }
 
@@ -425,7 +426,7 @@ const fzOccupancy = {
             r.publish = publish;
             maybeSubscribe(msg.device, options, r, meta?.logger);
             const out = {presence: occupied};
-            if (!occupied) {
+            if (!occupied && options?.fp400_zone_mode !== 'native') {
                 Object.assign(out, clearZones(r));
                 out.target_count = 0;
                 out.targets = [];
@@ -433,7 +434,8 @@ const fzOccupancy = {
             }
             return out;
         }
-        if (ep >= 3 && ep <= 10) return {[`native_zone_${ep - 2}`]: occupied};
+        if (ep >= 3 && ep <= 10) return {[`native_zone_${ep - 2}`]: occupied,
+            ...(options?.fp400_zone_mode === 'native' ? {[`zone_${ep - 2}`]: occupied} : {})};
     },
 };
 
@@ -450,7 +452,7 @@ const fzLocationRaw = {
         maybeSubscribe(msg.device, options, r, meta?.logger);
         const layout = parseLayout(options?.fp400_layout);
         const targets = parsed.targets.map((t) => ({id: t.id, x: t.x, y: t.y, cell: cellOf(t.x, t.y)}));
-        const out = evaluateZones(r, layout, targets);
+        const out = options?.fp400_zone_mode === 'native' ? {} : evaluateZones(r, layout, targets);
         const count = Math.max(parsed.declared, targets.length);
         if (count !== r.lastCount) {
             out.target_count = count;
@@ -460,6 +462,7 @@ const fzLocationRaw = {
         const interval = layout.targetsInterval;
         if (interval >= 0 && (Object.keys(out).length > 0 || now - r.lastTargets >= interval)) {
             out.targets = targets.map((t) => ({id: t.id, x: t.x, y: t.y, row: t.cell?.row ?? null, col: t.cell?.col ?? null}));
+            out.targets_updated_at = now;
             if (parsed.truncated) out.targets_truncated = true;
             r.lastTargets = now;
         }
@@ -540,7 +543,9 @@ const tzFp400 = {
                 return {state: {background_learning_result: 'running'}};
             }
             case 'location_subscribe': {
-                await ep.command(CL_LOCATION, 'subscribe', {timeout: SUBSCRIBE_SECONDS}, {...MO, disableDefaultResponse: true});
+                const seconds = value === 'start' ? SUBSCRIBE_SECONDS : Number(value);
+                if (!Number.isInteger(seconds) || seconds < 1 || seconds > 3600) throw new Error('Stream duration must be 1..3600 seconds');
+                await ep.command(CL_LOCATION, 'subscribe', {timeout: seconds}, {...MO, disableDefaultResponse: true});
                 rt(meta.device).lastSubscribe = Date.now();
                 return {};
             }
@@ -569,20 +574,21 @@ const fp400Extend = {
     fromZigbee: [fzOccupancy, fzLocationRaw, fzConfigRaw, fzConfigAttr],
     toZigbee: [tzFp400],
     exposes: [
-        e.binary('presence', ea.STATE, true, false).withDescription('Gesamtpräsenz im Erfassungsbereich'),
-        e.numeric('target_count', ea.STATE).withDescription('Anzahl erkannter Personen (Live-Stream)'),
+        e.binary('presence', ea.STATE, true, false).withDescription('Presence in the detection area'),
+        e.numeric('target_count', ea.STATE).withDescription('Number of reported targets'),
         ...Array.from({length: MAX_ZONES}, (_, i) =>
             e.binary(`zone_${i + 1}`, ea.STATE, true, false).withLabel(`Zone ${i + 1}`)
-                .withDescription('Software-Zone, berechnet aus den Personen-Koordinaten und dem Layout aus dem FP400-Editor')),
-        e.enum('install_mode', ea.ALL, Object.keys(INSTALL_MODES)).withDescription('Montageart'),
-        e.enum('side_install', ea.ALL, Object.keys(SIDE_INSTALLS)).withDescription('Wandmontage: gerade Wand oder Ecke'),
-        e.numeric('install_height', ea.ALL).withUnit('mm').withValueMin(0).withValueMax(5000).withDescription('Montagehöhe'),
-        e.enum('background_learning', ea.SET, ['start']).withDescription('KI-Hintergrund-Lernen starten (Raum muss leer sein)'),
+                .withDescription('Zone occupancy (software or verified native mode)')),
+        e.enum('install_mode', ea.ALL, Object.keys(INSTALL_MODES)).withDescription('Mounting type'),
+        e.enum('side_install', ea.ALL, Object.keys(SIDE_INSTALLS)).withDescription('Wall position: flat wall or corner'),
+        e.numeric('install_height', ea.ALL).withUnit('mm').withValueMin(0).withValueMax(5000).withDescription('Mounting height'),
+        e.enum('background_learning', ea.SET, ['start']).withDescription('Start background learning (room must be empty)'),
     ],
     options: [
-        e.text('fp400_layout', ea.SET).withDescription('Zonen-Layout (JSON). Wird von der FP400-Zonen-App geschrieben.'),
+        e.enum('fp400_zone_mode', ea.SET, ['software', 'native']).withDescription('Software zones need continuous positions; native mode requires verified sensor zones.'),
+        e.text('fp400_layout', ea.SET).withDescription('Zone layout (JSON), managed by FP400 Zones.'),
         e.binary('fp400_subscribe', ea.SET, true, false)
-            .withDescription('Experimentell: Positions-Stream regelmäßig per Befehl anfordern (nur nötig, falls Koordinaten nur bei Betreten/Verlassen kommen).'),
+            .withDescription('Legacy continuous stream renewal. Leave disabled when the app manages viewing sessions.'),
     ],
     configure: [
         async (device, coordinatorEndpoint) => {
@@ -615,7 +621,7 @@ export default {
     zigbeeModel: ['lumi.models.4447_8295'],
     model: 'PS-S05D',
     vendor: 'Aqara',
-    description: 'Spatial multi-sensor FP400 (Zonen über FP400-Zonen-App)',
+    description: 'Spatial multi-sensor FP400 (FP400 Zones)',
     // Z2M reconfigures the device automatically when this version changes.
     version: CONVERTER_VERSION,
     extend: [

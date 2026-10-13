@@ -1,10 +1,11 @@
-# FP400 Zonen
+﻿# FP400 Zones
 
-Zonen-Editor und automatische Einrichtung für den Aqara FP400 in Zigbee2MQTT, ohne Aqara-Hub.
+Guided room setup and zone management for Aqara FP400 in Zigbee2MQTT, without an Aqara hub.
 
-- Installiert und aktualisiert den FP400-Converter in Zigbee2MQTT automatisch
-- Zeigt Personen live auf einem 16 × 20-Raster (50-cm-Zellen)
-- Bis zu 8 Zonen als Binärsensoren in Home Assistant
-- Ausschluss-, Störquellen- und Ein-/Ausgangsbereiche, Montage, Hintergrund-Lernen
+- Dashboard for multiple sensors
+- Illustrated mounting, height and empty-room learning wizard
+- Live room boundary tracing and touch-friendly zone editor
+- Light and dark appearance, with Home Assistant theme detection
+- Automatic converter installation and device configuration
 
-Details stehen im Reiter „Dokumentation“.
+Open the Documentation tab for setup, stream behavior and experimental native-zone limitations.

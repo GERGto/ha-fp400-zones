@@ -1,125 +1,53 @@
-# FP400 Zonen für Zigbee2MQTT
+﻿# FP400 Zones
 
-<img src="fp400_zones/logo.png" alt="FP400 Zonen" width="160" align="right">
+A Home Assistant app for setting up and managing multiple Aqara FP400 sensors in Zigbee2MQTT, without an Aqara hub. English interface, responsive mobile editor, and light/dark themes.
 
-Zonen für den Aqara FP400 (`lumi.models.4447_8295`) in Zigbee2MQTT – ohne Aqara-Hub, ohne Cloud.
+## Features
 
-![Stage: experimental](https://img.shields.io/badge/stage-experimental-orange)
-[![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-blue)](LICENSE)
+- Sensor dashboard with presence, illuminance and zone counts.
+- Guided mounting selection, interactive height adjustment, empty-room learning and live boundary tracing.
+- Per-room editor with up to eight zones, obstacle masks, undo and local drafts.
+- Automatic converter installation and sensor configuration through Zigbee2MQTT.
+- Live viewing sessions with expiring stream requests; experimental verified native zone processing.
 
-## Was die App macht
+## Install
 
-- Installiert und aktualisiert den FP400-Converter automatisch über die Zigbee2MQTT-MQTT-API (`bridge/request/converter/save`)
-- Konfiguriert den Sensor
-- Zonen-Editor in der HA-Seitenleiste (Ingress) mit Live-Positionen auf einem 16 × 20-Raster (50-cm-Zellen)
-- Bis zu 8 Zonen als Binärsensoren `zone_1` … `zone_8`
-- Ausschluss-, Störquellen- und Ein-/Ausgangsbereiche, Montage und Hintergrund-Lernen
-- MQTT-Zugangsdaten automatisch über den Supervisor
+Requires Home Assistant OS/Supervisor on amd64 or aarch64, a configured MQTT broker, and Zigbee2MQTT 2.x with the converter MQTT API and Home Assistant MQTT discovery. FP400 must use Zigbee mode. Exact minimum HA/Z2M versions are not verified; device diagnostics were performed with Z2M 2.14.2.
 
-## Voraussetzungen
+[Add this repository to Home Assistant](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FGERGto%2Fha-fp400-zones)
 
-- Home Assistant OS mit Supervisor und App-Store, auf `amd64` oder `aarch64`
-- Eine genaue minimale Home-Assistant-Version ist noch nicht durch Installationstests belegt. Home Assistant Container/Core allein bietet keinen App-Store; dafür siehe Docker unten.
-- Zigbee2MQTT 2.x mit Unterstützung der MQTT-Converter-API und aktivierter Home-Assistant-MQTT-Discovery. Die bisherige Angabe „≥ 2.0“ ist noch keine verifizierte Kompatibilitätszusage.
-- Mosquitto-Broker-App
-- FP400 im Zigbee-Modus
+Or add `https://github.com/GERGto/ha-fp400-zones` under **Settings > Apps > App store > Repositories**. Install **FP400 Zones**, start it, and open its web UI. The container builds locally during installation. This is an app/add-on, not a HACS integration.
 
-## Installation
+Back up Zigbee2MQTT before the first setup. If required, the app offers to enable external JavaScript converters and restart Zigbee2MQTT. This allows installed converter code to execute inside Zigbee2MQTT.
 
-[![Repository hinzufügen](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FGERGto%2Fha-fp400-zones)
+## First room
 
-Manuell: **Einstellungen → Apps → App-Store → ⋮ → Repositories** → `https://github.com/GERGto/ha-fp400-zones` einfügen → **FP400 Zonen** installieren → starten → **Zur Seitenleiste hinzufügen**.
+Select **Add sensor** on the dashboard, pair the FP400, then open its tile. The wizard guides you through mounting, height, empty-room learning and two manually confirmed walks around the room. Create your first zone in the editor and save it. See the [complete workflow and options](fp400_zones/DOCS.md).
 
-> Die Installation baut das Image lokal und dauert ein paar Minuten. Dies ist ein Add-on, keine HACS-Integration. Für eine lokale Installation ohne Repository kopiere den Ordner `fp400_zones` nach `/addons/fp400_zones` auf dem HA-OS-Host, lade den App-Store neu und installiere die App unter „Lokale Apps“.
+Existing saved zones are retained during upgrade and open directly in the editor. **Run setup** repeats calibration without deleting zones. New rooms begin with an empty zone list.
 
-## Einrichtung in 3 Schritten
+## Position streams and sensor zones
 
-1. **App öffnen** und die Checkliste links abarbeiten. Falls nötig, aktiviert „Externe Converter erlauben“ nach Bestätigung die Ausführung externer JavaScript-Converter und startet Z2M einmal neu. Vorher die Z2M-Konfiguration sichern.
-2. **Converter und Sensor-Konfiguration** laufen automatisch. Einmal durch den Raum laufen, bis „Positionen kommen an“ grün ist.
-3. **Zonen malen**, benennen, „Layout speichern“. Orientierung prüfen: an die linke Wand gehen; erscheint der Punkt rechts, „horizontal spiegeln“ aktivieren.
+Software zones are the default and require continuous position reports even with the editor closed. Native zone transfer is experimental: exact readback must match the saved layout before switching to sensor processing. Test entry and exit in every zone after switching. A successful transfer alone does not prove occupancy reporting works with every firmware.
 
-Details zur Bedienung und zu den Optionen: [fp400_zones/DOCS.md](fp400_zones/DOCS.md).
+In native mode, or with no active software zones, opening the editor requests a 60-second stream and renews it while visible. Leaving or hiding the page stops renewal; the final request expires within 60 seconds. A lost connection expires its viewer lease within 45 seconds. Multiple viewers are handled independently. Saving a changed layout returns to software mode until it is transferred and verified again.
 
-## Entitäten in Home Assistant
+Room tracing estimates the outer envelope of your walk; it is not a measurement of actual walls or recesses. The sensor grid remains 16 by 20 cells of 50 cm. The viewport fits the estimated room.
 
-| Entität | Bedeutung |
-|---|---|
-| `presence` | Anwesenheit im Raum |
-| `target_count` | Anzahl erkannter Personen |
-| `illuminance` | Helligkeit |
-| `zone_1` … `zone_8` | Zone belegt/frei |
-| `install_mode`, `side_install`, `install_height` | Montage |
-| `background_learning` | Hintergrund-Lernen |
+## Standalone
 
-Diese Entitäten werden durch Zigbee2MQTT und dessen MQTT-Discovery bereitgestellt. Die App registriert keine eigenen Home-Assistant-Dienste oder Events. Die Modellkennung `lumi.models.4447_8295` bezeichnet den Gerätetyp, keine individuelle Seriennummer.
+Node 22 is recommended. From `fp400_zones/app`, install production dependencies with `npm ci --omit=dev`, set `MQTT_URL`, optionally `MQTT_USER` and `MQTT_PASSWORD`, and run `npm start`. Other variables: `BASE_TOPIC` (zigbee2mqtt), `AUTO_SETUP` (true), `PORT` (8099), `DATA_DIR` (app/data). Environment files are not automatically loaded.
 
-## Ohne Home Assistant OS (Docker)
+Alternatively build `fp400_zones/Dockerfile`, mount persistent storage at `/app/data`, pass the variables above, and bind port 8099 to loopback. Standalone mode has no login: use an authenticated reverse proxy for remote access. WebSockets require a matching Origin. MQTT TLS certificates are verified; a private CA can be supplied with `NODE_EXTRA_CA_CERTS`.
 
-Ohne Supervisor liest die App ihre Einstellungen aus Umgebungsvariablen. Beispiel für `docker-compose.yml` im Repo-Root:
+## Data and removal
 
-```yaml
-services:
-  fp400-zones:
-    build: ./fp400_zones
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8099:8099"
-    environment:
-      MQTT_URL: mqtt://mqtt.example.invalid:1883
-      MQTT_USER: ""
-      MQTT_PASSWORD: ""
-      BASE_TOPIC: zigbee2mqtt
-      AUTO_SETUP: "true"
-    volumes:
-      - ./data:/app/data
-```
+There is no app telemetry or cloud service. Device identifiers, layout backups and profiles are stored in `/data/state.json`, zone options in Zigbee2MQTT, and drafts/theme/debug preferences in browser storage (`fp400.v2.*`). A remotely configured broker receives sensor data. Exports and backups can contain private room information and credentials.
 
-Ersetze `mqtt.example.invalid` durch deinen Broker. Starte mit `docker compose up -d --build`; der Editor ist auf dem Docker-Host unter `http://localhost:8099` erreichbar. Ohne Supervisor gibt es keine Anmeldung. Das Beispiel bindet deshalb nur an Loopback; für Fernzugriff einen authentifizierenden Reverse-Proxy verwenden. WebSocket-Clients müssen einen zur Host-Adresse passenden HTTP-Origin senden. Für `mqtts://`/`wss://` muss das Serverzertifikat gültig und vertrauenswürdig sein; eine eigene CA lässt sich im Standalone-Container über `NODE_EXTRA_CA_CERTS` bereitstellen.
+Before uninstalling, clear unwanted obstacle masks using the editor and remove unwanted native zones in Zigbee2MQTT (`native_zones: clear`, experimental). Stop the app, remove `aqara-fp400-zones.mjs` from Zigbee2MQTT external converters, and remove the `fp400_layout`, `fp400_zone_mode` and `fp400_subscribe` device options. Uninstall the app. Review remaining MQTT discovery entities, browser storage, exports and backups. Sensor mounting and bindings are not automatically reset. Removing the converter can change entity availability.
 
-Weitere Standalone-Variablen: `MQTT_USER`, `MQTT_PASSWORD`, `BASE_TOPIC` (Standard `zigbee2mqtt`), `AUTO_SETUP` (`true`/`false`), `PORT` (Standard `8099`) und `DATA_DIR` (Standard `/app/data`). Zugangsdaten nicht in Git einchecken. Im Add-on gelten stattdessen die [App-Optionen](fp400_zones/DOCS.md#optionen).
+## Development and support
 
-## Fehlersuche
+See [CONTRIBUTING.md](CONTRIBUTING.md), [release notes](fp400_zones/CHANGELOG.md), and [release verification](RELEASE_REVIEW.md). Report issues at the [issue tracker](https://github.com/GERGto/ha-fp400-zones/issues). Protocol support remains experimental and derives from community investigation; it is not an official Aqara integration.
 
-- **„Keine Antwort auf zigbee2mqtt/bridge/info“:** Läuft Zigbee2MQTT, und stimmt `base_topic`?
-- **Converter-Schritt bleibt rot:** Die Fehlermeldung steht in der Checkliste. Sie kommt direkt von Zigbee2MQTT, Details im Z2M-Log.
-- **„Andere FP400-Converter“:** Ein älterer oder fremder FP400-Converter ist installiert und überschreibt die Erkennung. Klick auf „Entfernen“.
-- **Keine Positionen:** Klick auf „Neu konfigurieren“. Hilft das nicht, setz in Z2M beim Gerät die Option `fp400_subscribe: true`.
-- **Mehr als 2 Personen werden abgeschnitten:** Das ist ein Problem von Ember-Koordinatoren (Silabs) und tritt mit TI/Z-Stack nicht auf.
-
-## Grenzen / Status
-
-- Experimentell, noch nicht an echter Hardware verifiziert.
-- Zonen werden aus den Positionen berechnet (Software-Zonen). Native Sensor-Zonen gibt es nur experimentell.
-- Bei Ember/Silabs-Koordinatoren werden Frames mit 3+ Personen abgeschnitten ([Koenkk/zigbee-herdsman#1886](https://github.com/Koenkk/zigbee-herdsman/issues/1886)). TI/Z-Stack ist nicht betroffen.
-
-## Danksagung / Quellen
-
-- [Koenkk/zigbee2mqtt#33146](https://github.com/Koenkk/zigbee2mqtt/issues/33146) – Community-Mitschnitte und Analyse
-- [RAR/matterjs-server](https://github.com/RAR/matterjs-server) und [RAR/ha-aqara-fp400](https://github.com/RAR/ha-aqara-fp400) – Matter-Modell derselben Cluster, Raster-Definition
-
-Inoffizielles Projekt, nicht mit Aqara verbunden. Aqara ist eine Marke der Lumi United Technology Co., Ltd.
-
-## Deinstallation
-
-1. Falls gewünscht, Layouts exportieren. Falls native Zonen oder Masken geschrieben wurden, diese **vor dem Stoppen** im Editor löschen: native Zonen → „Alle löschen“; die drei Maskenebenen leeren → „Masken schreiben“. Das Löschen nativer Zonen ist ebenfalls experimentell und muss am Gerät geprüft werden.
-2. FP400 Zonen stoppen, damit die automatische Einrichtung nichts erneut installiert. In Zigbee2MQTT ausschließlich `aqara-fp400-zones.mjs` unter externen Convertern entfernen. Alternativ mit Home Assistants Aktion `mqtt.publish` an `<base_topic>/bridge/request/converter/remove` den Payload `{"name":"aqara-fp400-zones.mjs"}` senden; `retain` muss aus sein und die erfolgreiche Z2M-Antwort geprüft werden.
-3. Zigbee2MQTT stoppen. In dessen Gerätekonfiguration nur `fp400_layout` und gegebenenfalls `fp400_subscribe` bei den betroffenen Sensoren entfernen. `advanced.enable_external_js` nur auf den vorherigen Wert zurücksetzen, wenn keine anderen Converter/Erweiterungen es benötigen. Z2M wieder starten. Montage, Bindings und Reporting bleiben im Sensor erhalten; für einen vollständigen Geräte-Neuanfang muss der FP400 aus Z2M entfernt und gemäß Herstelleranleitung zurückgesetzt werden. Das ist für einen bloßen Wechsel des Converters nicht erforderlich.
-4. FP400 Zonen über **Einstellungen → Apps → FP400 Zonen → Deinstallieren** entfernen, anschließend bei Bedarf das Repository entfernen. Die eigenen App-Daten unter `/data` werden mit dem Add-on entfernt. Bei Docker `docker compose down` ausführen und das selbst angelegte Verzeichnis `./data` gezielt löschen.
-5. In **Einstellungen → Geräte & Dienste → MQTT** prüfen, ob alte FP400-Zonenentitäten übrig sind; nur diese entfernen. Falls sie wieder erscheinen, die zugehörigen retained Discovery-Nachrichten des FP400 im Broker prüfen und gezielt löschen, niemals das gesamte Discovery-Topic. Andere MQTT-Geräte behalten.
-6. Browser-Entwürfe entfernen: auf der geöffneten HA-/Editor-Origin in den Browser-Entwicklerwerkzeugen unter „Local Storage“ nur Schlüssel mit Präfix `fp400.` löschen. Exporte und alte Backups enthalten weiterhin Layouts und ggf. Zugangsdaten; bei gewünschter vollständiger Löschung diese separat entfernen.
-
-## Datenschutz und Fehlermeldungen
-
-Die App kommuniziert mit dem Supervisor und dem konfigurierten MQTT-Broker. Positionen, Anwesenheit, Gerätekennungen und Zonennamen werden lokal zwischen Sensor, Zigbee2MQTT, Broker und Browser verarbeitet. Bei einem externen Broker verlassen sie entsprechend dein Heimnetz. Es gibt keine eigene Telemetrie und keine Aqara-Cloud-Verbindung. Installation und Updates laden Dateien von GitHub, Container- und npm-Registries.
-
-Layouts und Gerätekennungen liegen in `/data/state.json`, in Zigbee2MQTT und als Entwurf im Browser (`fp400.*`). MQTT-Zugangsdaten stehen gegebenenfalls in den Supervisor-Optionen bzw. der Docker-Konfiguration. Backups können diese Daten enthalten. Der Live-Editor zeigt absichtlich Gerätenamen und Positionen; Screenshots und Layout-Exporte daher vor dem Teilen prüfen.
-
-Die App hat keinen separaten Debug-Schalter. Verwende ihren Reiter **Protokoll** und bei Bedarf vorübergehend Zigbee2MQTTs Option `advanced.log_level: debug`; danach zurücksetzen. App-Logs schwärzen bekannte Zugangsdaten, URLs, IPv4-Adressen und IEEE-Kennungen. Z2M-Debug-Logs können dagegen vollständige MQTT-Nachrichten und private Gerätedaten enthalten. Vor dem Melden von Fehlern Zugangsdaten, Namen, Gerätekennungen und Raumdaten entfernen. Home Assistants `logger`-Konfiguration steuert diesen separaten Node-Prozess nicht.
-
-## Lizenz und Mitwirken
-
-[MIT-Lizenz](LICENSE). Fehler mit App-/Z2M-Version, Koordinator und bereinigten Logs im [Issue-Tracker](https://github.com/GERGto/ha-fp400-zones/issues) melden. Entwicklung und lokale Prüfungen: [CONTRIBUTING.md](CONTRIBUTING.md). Änderungen: [Changelog](fp400_zones/CHANGELOG.md). Der interne Converter hat einen eigenen Versionsstand; App, npm-Paket und Release-Tag verwenden die App-Version. Nicht veröffentlichte Änderungen stehen unter „Unreleased“.
-
-## English
-
-FP400 Zonen is an experimental Home Assistant OS app for Aqara FP400 zones using Zigbee2MQTT and MQTT discovery. Add the repository using the button above, install, start and open the sidebar editor. The app installs an external JavaScript converter, configures the sensor and stores up to eight software zones. No Aqara cloud is used. App option translations are available in English and German; the editor is currently German. Minimum HA/Z2M versions and real hardware operation still require verification. Uninstalling the app alone does not remove its converter, Z2M device options, sensor settings, MQTT discovery records, browser drafts or backups. Follow the removal instructions above. See [MIT license](LICENSE), [contributing](CONTRIBUTING.md) and [issues](https://github.com/GERGto/ha-fp400-zones/issues).
+License: [MIT](LICENSE).

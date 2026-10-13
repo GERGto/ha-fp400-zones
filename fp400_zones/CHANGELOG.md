@@ -1,20 +1,19 @@
-# Changelog
+﻿# Changelog
 
-## Unreleased
+## 1.1.0
 
-- MQTT-TLS-Zertifikate werden geprüft; bekannte Zugangsdaten und Gerätekennungen in App-Diagnosen werden geschwärzt.
-- WebSocket-Anfragen validiert, Nachrichtengröße begrenzt, Standalone-Origin und Add-on-Ingress geprüft.
-- MQTT-Werte im Editor als Text dargestellt; ungültige Converter-Layouts abgefangen.
-- Layout-Sicherung erst nach erfolgreicher Zigbee2MQTT-Antwort; entfernte Geräte aus dem Live-Cache entfernt.
-- `ws` auf 8.22.0 aktualisiert, um bekannte Sicherheitslücken zu beheben.
-- Regressionstests, ESLint, Add-on-Linter und Container-Builds in CI ergänzt.
-- Installation, Datenschutz, Deinstallation und Grenzen der bisherigen Kompatibilitätsprüfung dokumentiert.
-
-Noch kein Release: App-Version und bestehender Tag bleiben bei 1.0.0; der interne Converter-Versionsstand ist unabhängig davon 1.1.0.
+- New responsive, English interface with a multi-sensor dashboard and dedicated room pages.
+- Guided mounting selection, interactive height adjustment, a ten-second exit countdown and sensor-confirmed background learning.
+- Two manually confirmed boundary walks with a live estimated outline and automatic room view fitting. Sensor resolution remains 50 cm.
+- Empty zone lists, stable zone IDs, touch drawing, rectangle and erase tools, per-sensor drafts and obstacle controls.
+- Central light/dark/automatic theme and opt-in diagnostics. More detailed, redacted app operation logs.
+- Automatic short position-stream leases while a room is viewed. Software zones retain their required stream; native sensor mode does not.
+- Experimental native zone transfer with stricter readback verification and explicit mode selection. Test real occupancy after switching.
+- Converter 1.2.0 supports bounded stream durations and native occupancy routing.
+- MQTT TLS verification, WebSocket validation, diagnostic redaction and dependency security fixes from the release review.
+- Browser tests for desktop and mobile workflows, plus backend, protocol and lifecycle regression tests.
 
 ## 1.0.0
 
-- Erste Version als Home-Assistant-App
-- Automatische Einrichtung: externe Converter in Z2M erlauben, Converter installieren und aktualisieren, Sensor konfigurieren
-- Zonen-Editor in der Seitenleiste (Ingress), MQTT-Zugangsdaten über den Supervisor
-- Converter v1.1.0: Definition mit Version, damit Z2M bei Updates selbst neu konfiguriert
+- Initial Home Assistant app with a Zigbee2MQTT converter and zone editor.
+- MQTT service discovery, ingress and automatic converter installation.

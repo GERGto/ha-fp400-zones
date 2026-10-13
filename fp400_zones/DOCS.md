@@ -1,66 +1,52 @@
-# FP400 Zonen
+﻿# FP400 Zones
 
-Zonen für den Aqara FP400 (Spatial Multi-Sensor) in Zigbee2MQTT. Du brauchst keinen Aqara-Hub und keine Cloud.
+Manage your FP400 sensors from one dashboard. Each tile shows presence, zone count and illuminance. Tap a tile to open its room. The interface adapts to phones and supports touch drawing.
 
-## Voraussetzungen
+## Setup
 
-- Home Assistant OS mit Supervisor auf `amd64` oder `aarch64`. Die minimale HA-/Z2M-Version ist noch nicht durch einen Hardwaretest belegt.
-- Zigbee2MQTT 2.x mit MQTT-Converter-API und Home-Assistant-MQTT-Discovery, mit dem FP400 bereits angelernt (das Anlernen geht notfalls auch aus der App heraus)
-- Mosquitto-Broker-App (früher Add-on). Die Zugangsdaten holt sich die App automatisch.
+1. Start the app and open its web UI. Connection problems appear as an actionable banner. MQTT credentials are obtained from the Supervisor when using its MQTT service.
+2. Choose **Add sensor**, open pairing and pair the powered FP400 in Zigbee mode. Pairing closes after about four minutes, or manually with **Close pairing**. Existing sensors remain connected.
+3. Open the new sensor tile. Choose wall or ceiling mounting, wall/corner position where applicable, and a room name.
+4. Adjust mounting height with the slider or numeric input. The illustration follows the selected height. Continue waits for sensor state confirmation.
+5. Remove people and pets. **Start exit countdown** gives you 10 seconds to leave. Empty-room learning then starts. Allow up to two minutes; the display shows elapsed time and progress against that waiting window. This is not a guaranteed sensor duration. Completion requires a fresh sensor result; a timeout is an error, never success.
+6. Enter alone and walk the room boundary twice. Live points form an approximate outer envelope. Confirm the first lap and then both laps manually. You can restart tracing. This estimates the walked area, not actual walls or recesses.
+7. Create your first zone. New rooms have no pre-created zones. Name the zone, select Draw or Rectangle, and drag on the grid. Use Erase or Undo to correct it, then **Save changes**.
 
-## Einrichtung
+The physical grid stays at 50 cm per cell; the view fits the estimated room. Mirror view changes only the display orientation. **Run setup** repeats the wizard later while preserving zones. Existing installations with saved zones bypass automatic onboarding.
 
-1. App starten und **Zur Seitenleiste hinzufügen** aktivieren.
-2. In der Seitenleiste **FP400 Zonen** öffnen. Links steht die Checkliste für die Einrichtung:
-   - **Externe Converter erlauben:** Neuere Z2M-Installationen haben das standardmäßig ausgeschaltet. Ein Klick schaltet es ein und startet Z2M einmal neu.
-   - **FP400-Converter:** Die App installiert den Converter automatisch über Zigbee2MQTT und hält ihn bei App-Updates aktuell.
-   - **Sensor:** Die App konfiguriert den Sensor automatisch. Danach einmal durch den Raum laufen. Der Punkt wird grün, sobald Positionen ankommen.
-3. Zonen malen, benennen und auf **Layout speichern** klicken. Fertig.
+## Zones and obstacles
 
-In Home Assistant erscheinen beim Sensor die Entitäten `zone_1` … `zone_8` (belegt/frei), `presence`, `target_count` und `illuminance`.
+Create up to eight zones. Zone IDs stay stable when another zone is deleted. Hold time delays software-zone clearing to reduce boundary flicker. Unsaved drafts are stored separately per sensor in this browser. Saving writes the layout to Zigbee2MQTT and keeps a backup in app storage; Export downloads JSON.
 
-## Bedienung
+Choose Exclusion, Interference or Entry / exit under **Room obstacles**, draw on the map, and explicitly apply the masks to the sensor. Clear selected area removes its draft mask; apply it to write the empty mask. These masks are separate from zone occupancy.
 
-- **Malen:** Zone oben auswählen und Zellen anklicken oder ziehen. Rechtsklick radiert.
-- **Tasten:** `B` Pinsel, `R` Rechteck, `E` Radierer, `1`–`8` Zone wählen, `Strg+Z` rückgängig.
-- **Verzögerung (Sekunden):** So lange bleibt eine Zone nach dem Verlassen noch „belegt“. Das gleicht Radar-Zittern an den Rändern aus.
-- **Ausschluss / Störquelle / Ein-Ausgang:** Bereichsmasken, die direkt auf den Sensor geschrieben werden (Knopf „Masken schreiben“). Ausschluss blendet z. B. den Flur hinter einer offenen Tür aus.
-- **Montage:** Wand oder Decke, gerade Wand oder Ecke, Höhe. Nach dem Ändern lohnt sich „Hintergrund lernen“; der Raum muss dabei leer sein.
-- **Orientierung:** Geh an die linke Wand. Erscheint dein Punkt rechts, setz den Haken bei „horizontal spiegeln“. Das ändert nur die Anzeige, die Zonen bleiben richtig.
+Zigbee2MQTT MQTT discovery provides `presence`, `illuminance`, `target_count` and `zone_1` through `zone_8`. Empty/unconfigured zone entities may still exist in Home Assistant because converter capabilities are fixed. The app creates no separate HA services or events.
 
-Das Layout wird in der Z2M-`configuration.yaml` gespeichert, als Geräteoption `fp400_layout`. Zusätzlich legt die App eine Sicherung an, die in Home-Assistant-Backups enthalten ist.
+## Live viewing and native zones
 
-## Optionen
+Software processing is the default: active software zones require a continuous position stream. Closing the editor cannot stop that stream without breaking those zones.
 
-| Option | Bedeutung |
-|---|---|
-| `base_topic` | Basis-Topic von Zigbee2MQTT, Standard `zigbee2mqtt` |
-| `auto_setup` | Standard `true`: Converter automatisch installieren und Sensor konfigurieren. Ist die Option aus, bleiben die Knöpfe in der Checkliste trotzdem nutzbar. |
-| `mqtt_url`, `mqtt_user`, `mqtt_password` | Nur nötig ohne die Mosquitto-App, z. B. `mqtt://mqtt.example.invalid:1883` |
+**Transfer zones to sensor** writes the saved layout and compares readback. **Use verified sensor zones** is available only after successful verification of that layout. Native mode is experimental: walk into and out of every zone and check actual occupancy before relying on it. Software hold delays are not applied to native reports. Use **Use software zones** if native reporting fails.
 
-Die drei optionalen MQTT-Werte haben keinen vorbelegten Zugang. Ersetze den Beispielhost durch deinen Broker. Ein gesetztes `mqtt_url` hat Vorrang vor den automatisch ermittelten Supervisor-Zugangsdaten. TLS (`mqtts://`) prüft das Serverzertifikat; ungültige oder nicht vertrauenswürdige Zertifikate werden abgewiesen. Die App fordert weiterhin den MQTT-Dienst des Supervisors an (`mqtt:need`).
+When native processing is active, or no software zones exist, the app renews a short position subscription only while the editor or boundary tracing view is visible. Hiding/leaving the page stops renewal; the last request expires within 60 seconds. A disconnected browser's lease expires within 45 seconds. Multiple viewers are independent. Saving an edited layout activates software processing until native zones are transferred and verified again. Leave Zigbee2MQTT's legacy `fp400_subscribe` option disabled when this app manages streams.
 
-Die App schreibt auf ausdrücklichen Klick Sensor-Masken und Montageparameter. Automatische Einrichtung installiert Code in Zigbee2MQTT und kann den Sensor konfigurieren. Diese Änderungen überleben die Deinstallation der App. Vor der Ersteinrichtung die Z2M-Konfiguration sichern.
+## Appearance and diagnostics
 
-## Fehlersuche
+**Settings > Appearance** offers Home Assistant / system, Light and Dark. Automatic follows the parent Home Assistant theme when accessible; otherwise it uses the device preference. The explicit theme choice applies across sensors.
 
-- **„Keine Antwort auf zigbee2mqtt/bridge/info“:** Läuft Zigbee2MQTT, und stimmt `base_topic`?
-- **Converter-Schritt bleibt rot:** Die Fehlermeldung steht in der Checkliste. Sie kommt direkt von Zigbee2MQTT, Details im Z2M-Log.
-- **„Andere FP400-Converter“:** Ein älterer oder fremder FP400-Converter ist installiert und überschreibt die Erkennung. Klick auf „Entfernen“.
-- **Keine Positionen:** Klick auf „Neu konfigurieren“. Hilft das nicht, setz in Z2M beim Gerät die Option `fp400_subscribe: true`.
-- **Mehr als 2 Personen werden abgeschnitten:** Das ist ein Problem von Ember-Koordinatoren (Silabs) und tritt mit TI/Z-Stack nicht auf.
+Logs are hidden by default. Enable **Show technical details and logs** in Settings when troubleshooting. Home Assistant's app Log tab includes operation names, durations and failures. Credentials and device addresses are redacted, but inspect diagnostics before sharing them.
 
-## Grenzen
+If positions stop, check the app connection and Zigbee2MQTT logs, then reconfigure the sensor in Settings diagnostics. If converter activation is pending, restart Zigbee2MQTT. If room learning times out, ensure the room is empty and inspect Zigbee2MQTT command failures before retrying. Do not repeat pairing merely because a position is stale.
 
-- Die Zonen werden aus den Positionen berechnet, die der Sensor liefert (Software-Zonen). Die nativen Zonen im Sensor lassen sich unter „Experimentell“ schreiben. Dieses Protokoll ist aber noch nicht bestätigt.
-- Das Protokoll stammt aus Community-Mitschnitten (Koenkk/zigbee2mqtt#33146) und dem Matter-Modell derselben Cluster. Es ist keine offizielle Aqara-Dokumentation.
+## Configuration
 
-## Datenschutz, Protokolle und Deinstallation
+| Option | Purpose |
+| --- | --- |
+| `base_topic` | Zigbee2MQTT base topic, default `zigbee2mqtt` |
+| `auto_setup` | Automatically install/update the converter and configure sensors; default true |
+| `mqtt_url` | Optional broker override, for example `mqtt://mqtt.example.invalid:1883` |
+| `mqtt_user`, `mqtt_password` | Optional credentials for the overridden broker |
 
-Layouts/Gerätekennungen liegen in `/data/state.json`, Zigbee2MQTT und im lokalen Browser-Speicher (`fp400.*`). Es gibt keine eigene Telemetrie. Ein außerhalb des Heimnetzes konfigurierter MQTT-Broker empfängt die Daten entsprechend extern. Backups und Exporte können Raumdaten und Zugangsdaten enthalten.
+An explicit MQTT URL takes priority over Supervisor discovery. TLS certificates must be trusted. Automatic setup installs code in Zigbee2MQTT; mounting, learning and mask commands affect the sensor. These changes survive uninstalling the app. Back up Zigbee2MQTT first.
 
-Die App-Protokolle sind im Reiter „Protokoll“ sichtbar. Einen eigenen Debug-Schalter gibt es nicht. Für Zigbee2MQTT bei Bedarf vorübergehend `advanced.log_level: debug` verwenden und danach zurücksetzen; vor dem Teilen private Inhalte entfernen.
-
-Zum Entfernen zuerst gewünschte Sensor-Masken/native Zonen zurücksetzen, dann die App stoppen, ihren Converter und ihre Geräteoptionen in Zigbee2MQTT entfernen und die App deinstallieren. Anschließend verbliebene FP400-Discovery-Entitäten, Browser-Entwürfe, Exporte und Backups prüfen. Montage und Bindings im Sensor werden nicht automatisch zurückgesetzt. Die vollständige Schrittfolge steht im [Repository-README](https://github.com/GERGto/ha-fp400-zones#deinstallation).
-
-Keine eigenen HA-Dienste oder Events; Entitäten werden von Zigbee2MQTT per MQTT-Discovery bereitgestellt. Lizenz: [MIT](https://github.com/GERGto/ha-fp400-zones/blob/main/LICENSE). Unterstützung: [Issue-Tracker](https://github.com/GERGto/ha-fp400-zones/issues).
+Layouts, profiles and device identifiers are stored locally and in Zigbee2MQTT; browser drafts use local storage. There is no app telemetry. See the [repository documentation](https://github.com/GERGto/ha-fp400-zones#data-and-removal) for standalone deployment, privacy and full removal instructions.

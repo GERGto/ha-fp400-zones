@@ -1,3 +1,4 @@
+import {normalize} from '../public/model.js';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
@@ -29,7 +30,7 @@ async function start(t, extra = {}) {
         await rm(data, {recursive: true, force: true});
     });
     for (let i = 0; i < 100; i++) {
-        const match = /läuft auf Port (\d+)/.exec(output);
+        const match = /listening on port (\d+)/.exec(output);
         if (match) return {child, data, port: Number(match[1]), output: () => output};
         if (child.exitCode !== null) break;
         await delay(50);
@@ -125,7 +126,7 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
         await new Promise((resolve) => broker.close(resolve));
     });
     const {port, data, output} = await start(t, {MQTT_URL: `mqtt://127.0.0.1:${broker.address().port}`, AUTO_SETUP: 'true'});
-    for (let i = 0; i < 100 && !output().includes('FP400 konfiguriert'); i++) await delay(50);
+    for (let i = 0; i < 100 && !output().includes('FP400 configured'); i++) await delay(50);
     assert.deepEqual(requests.map((r) => r.topic), ['converter/save', 'device/configure']);
     assert.match(requests[0].request.code, /export default/);
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {origin: `http://127.0.0.1:${port}`});
@@ -147,8 +148,8 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
     const layout = {zones: []};
     assert.equal((await save(1, layout)).ok, true);
     const persisted = async () => JSON.parse(await readFile(path.join(data, 'state.json'), 'utf8'));
-    assert.deepEqual((await persisted()).layouts[ieee], layout);
+    assert.deepEqual((await persisted()).layouts[ieee], normalize(layout));
     rejectLayout = true;
     assert.equal((await save(2, {zones: [], targets_interval: 250})).ok, false);
-    assert.deepEqual((await persisted()).layouts[ieee], layout);
+    assert.deepEqual((await persisted()).layouts[ieee], normalize(layout));
 });

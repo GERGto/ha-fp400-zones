@@ -2,6 +2,10 @@ app/node_modules
 app/data
 app/.npm-cache
 app/test
+app/e2e
+app/test-results
+app/playwright-report
+app/playwright.config.mjs
 app/scripts
 app/eslint.config.mjs
 **/*.log
