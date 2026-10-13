@@ -23,7 +23,7 @@ import * as exposes from 'zigbee-herdsman-converters/lib/exposes';
 const e = exposes.presets;
 const ea = exposes.access;
 
-const CONVERTER_VERSION = '1.3.0';
+const CONVERTER_VERSION = '1.3.1';
 const MFR = 0x115f;
 const MO = {manufacturerCode: MFR};
 const GRID_COLS = 16;
@@ -73,9 +73,7 @@ const clusterConfig = {
     }),
     commands: cmdDefs({
         learn: {ID: 0x03, parameters: []},
-        appendZoneTyped: {ID: 0x04, parameters: byteParams(51)},
         appendZonePlain: {ID: 0x04, parameters: byteParams(50)},
-        removeZoneTyped: {ID: 0x08, parameters: byteParams(2)},
         removeZonePlain: {ID: 0x08, parameters: byteParams(1)},
     }),
     commandsResponse: {},
@@ -214,14 +212,14 @@ function parseLocation(payload) {
     return {declared, targets, truncated};
 }
 
-/** Zone struct as used by appendZone: {u8 id, u8 type, octstr cells, bool enabled}. */
-function encodeZone(zone, typed) {
+/** Zigbee appendZone members: {u8 id, enum8 type, octstr cells, bool enabled}; no leading STRUCT tag. */
+function encodeZone(zone) {
     const body = Buffer.concat([
-        Buffer.from([0x04, 0x00, T.U8, zone.id, T.U8, zone.type ?? 0, T.OCTET, MASK_BYTES]),
+        Buffer.from([0x04, 0x00, T.U8, zone.id, T.ENUM8, zone.type ?? 0, T.OCTET, MASK_BYTES]),
         zone.mask,
         Buffer.from([T.BOOL, zone.enabled === false ? 0 : 1]),
     ]);
-    return typed ? Buffer.concat([Buffer.from([T.STRUCT]), body]) : body;
+    return body;
 }
 
 function decodeNativeZones(value) {
@@ -311,8 +309,7 @@ async function readNativeZones(ep) {
     }
 }
 
-async function nativeZones(ep, layout, action, encoding) {
-    const typed = encoding !== 'plain';
+async function nativeZones(ep, layout, action) {
     const errors = [];
     const send = async (cmd, buf) => {
         try {
@@ -325,9 +322,9 @@ async function nativeZones(ep, layout, action, encoding) {
     const wanted = action === 'clear' ? [] : layout.zones.filter((z) => z.enabled && maskCount(z.mask) > 0);
     if (action !== 'read') {
         for (let id = 1; id <= MAX_ZONES; id++) {
-            await send(typed ? 'removeZoneTyped' : 'removeZonePlain', typed ? Buffer.from([T.U8, id]) : Buffer.from([id]));
+            await send('removeZonePlain', Buffer.from([id]));
         }
-        for (const zone of wanted) await send(typed ? 'appendZoneTyped' : 'appendZonePlain', encodeZone(zone, typed));
+        for (const zone of wanted) await send('appendZonePlain', encodeZone(zone));
         await sleep(1500);
     }
     const back = await readNativeZones(ep);
@@ -338,11 +335,12 @@ async function nativeZones(ep, layout, action, encoding) {
         } else {
             const ok = errors.length === 0 && back.length === wanted.length && wanted.every((z) => back.some((b) => b.id === z.id && b.cells === z.mask.toString('hex') && b.enabled === z.enabled));
             sync = ok ? 'verified' : 'mismatch';
+            if (!ok && !errors.length) errors.push('Zone readback mismatch: requested ' + wanted.length + ', received ' + back.length + '. Sensor did not confirm identical IDs, masks and enabled flags.');
         }
     }
     return {native_zones: Array.isArray(back) ? back.map((z) => ({id: z.id, enabled: z.enabled, cells: z.cells})) : [],
         native_layout: sync === 'verified' ? wanted.map((z) => `${z.id}:${z.mask.toString('hex')}`).sort().join('|') : null,
-        native_sync: sync, native_errors: errors.length ? errors.slice(0, 4).join('; ') : (typeof back === 'string' ? back : null), native_encoding: typed ? 'typed' : 'plain'};
+        native_sync: sync, native_errors: errors.length ? errors.slice(0, 4).join('; ') : (typeof back === 'string' ? back : null), native_encoding: 'zcl_members'};
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -496,10 +494,10 @@ const tzFp400 = {
                 }
             }
             case 'native_zones': {
-                const [action, encoding] = String(value).split('_');
+                const [action] = String(value).split('_');
                 if (!['write', 'clear', 'read'].includes(action)) throw new Error('native_zones must be write, write_plain, clear, clear_plain or read');
                 const layout = parseLayout(meta.options?.fp400_layout);
-                return {state: await nativeZones(ep, layout, action, encoding)};
+                return {state: await nativeZones(ep, layout, action)};
             }
         }
     },

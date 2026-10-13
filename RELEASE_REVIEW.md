@@ -1,3 +1,9 @@
+# Release verification: 1.2.2
+
+Read-only MQTT diagnostics confirmed the installed converter matched the released file and the sensor returned an empty native zone table after the failed write. The application had added an outer STRUCT tag and used UINT8 for zone type. The documented Zigbee payload uses struct members directly, ENUM8 for zone type, and a single plain byte for removal. See https://github.com/Koenkk/zigbee2mqtt/issues/33146 (device discussion; native zone command findings).
+
+The corrected encoder is covered by exact byte-level tests plus nonempty wrapped-ZCL readback and mismatch cases. All 23 Node tests pass locally. No diagnostic zone writes were made on the user device; successful physical transfer with this fix still needs confirmation after updating. Raw local captures remain ignored.
+
 # Release verification: 1.2.1
 
 Renaming now waits for Zigbee2MQTT acknowledgment and updates MQTT subscriptions. Joining closes after a new FP400 completes its interview. Broker regression tests verify successful/rejected renames, name validation, topic switching, incomplete interviews and automatic join closure. Desktop and mobile UI tests remain in CI. The README uses the official Home Assistant repository badge.

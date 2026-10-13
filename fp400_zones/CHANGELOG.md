@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## 1.2.2
+
+- Fixed native Zigbee zone command encoding: enum8 zone type, no outer struct tag, and one-byte removal IDs.
+- Exact byte-level regression tests cover a nonempty zone transfer and wrapped ZCL readback.
+- Readback failures now include requested/received zone counts. Verification remains strict.
+- Converter 1.3.1.
+
 ## 1.2.1
 
 - Official Add to Home Assistant repository button in the README.

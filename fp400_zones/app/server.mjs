@@ -152,7 +152,7 @@ function snapshot() {
         baseTopic: BASE,
         converterVersion: CONVERTER_VERSION,
         autoSetup: AUTO_SETUP,
-        version: '1.2.1',
+        version: '1.2.2',
         settings: persisted.settings,
         connections: {mqtt: S.mqtt.status, z2m: S.bridge.state},
         permitJoinUntil: S.permitJoinUntil,
@@ -690,7 +690,7 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-    log('info', `FP400 Zones 1.2.1 (converter ${CONVERTER_VERSION}) listening on port ${server.address().port} (${ADDON ? 'Home Assistant app' : 'Standalone'})`);
+    log('info', `FP400 Zones 1.2.2 (converter ${CONVERTER_VERSION}) listening on port ${server.address().port} (${ADDON ? 'Home Assistant app' : 'Standalone'})`);
     connectMqtt();
 });
 
