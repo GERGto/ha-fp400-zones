@@ -1,3 +1,7 @@
+# Release verification: 1.2.1
+
+Renaming now waits for Zigbee2MQTT acknowledgment and updates MQTT subscriptions. Joining closes after a new FP400 completes its interview. Broker regression tests verify successful/rejected renames, name validation, topic switching, incomplete interviews and automatic join closure. Desktop and mobile UI tests remain in CI. The README uses the official Home Assistant repository badge.
+
 # Release verification: 1.2.0
 
 Sensor-only zone storage replaces software evaluation. Saving waits for a unique correlated converter result, verifies zone and mask readback, and only then updates backups. Failure does not report success. Device-specific expose labels refresh on layout changes. Position leases are viewer-only. Green highlighting reads native occupancy reports.

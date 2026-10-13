@@ -5,8 +5,8 @@ Manage your FP400 sensors from one dashboard. Each tile shows presence, zone cou
 ## Setup
 
 1. Start the app and open its web UI. Connection problems appear as an actionable banner. MQTT credentials are obtained from the Supervisor when using its MQTT service.
-2. Choose **Add sensor**, open pairing and pair the powered FP400 in Zigbee mode. Pairing closes after about four minutes, or manually with **Close pairing**. Existing sensors remain connected.
-3. Open the new sensor tile. Choose wall or ceiling mounting, wall/corner position where applicable, and a room name.
+2. Choose **Add sensor**, open pairing and pair the powered FP400 in Zigbee mode. Pairing closes automatically when a newly added FP400 completes its interview, after about four minutes, or manually with **Close pairing**. Existing sensors remain connected.
+3. Open the new sensor tile. Choose wall or ceiling mounting, wall/corner position where applicable, and a room name. The name is also applied to Zigbee2MQTT after its confirmation; this changes the device MQTT topic. Existing Home Assistant entity IDs are not explicitly renamed. To synchronize a name entered in an older app version, use Rename and confirm the desired name again.
 4. Adjust mounting height with the slider or numeric input. The illustration follows the selected height. Continue waits for sensor state confirmation.
 5. Remove people and pets. **Start exit countdown** gives you 10 seconds to leave. Empty-room learning then starts. Allow up to two minutes; the display shows elapsed time and progress against that waiting window. This is not a guaranteed sensor duration. Completion requires a fresh sensor result; a timeout is an error, never success.
 6. Enter alone and walk the room boundary twice. Live points form an approximate outer envelope. Confirm the first lap and then both laps manually. You can restart tracing. This estimates the walked area, not actual walls or recesses.

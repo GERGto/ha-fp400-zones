@@ -89,18 +89,21 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
     const requests = [];
     const clients = new Set();
     const ieee = '0x0000000000000001';
-    let rejectLayout = false;
+    let rejectLayout = false, rejectRename = false, push;
+    const subscribed = [];
     const broker = net.createServer((socket) => {
         clients.add(socket);
         socket.on('close', () => clients.delete(socket));
         const parser = mqttPacket.parser();
         const send = (packet) => socket.write(mqttPacket.generate(packet));
         const publish = (topic, payload) => send({cmd: 'publish', topic: `zigbee2mqtt/${topic}`, payload: JSON.stringify(payload), qos: 0});
+        push = publish;
         socket.on('data', (data) => parser.parse(data));
         parser.on('packet', (packet) => {
             if (packet.cmd === 'connect') send({cmd: 'connack', returnCode: 0, sessionPresent: false});
             if (packet.cmd === 'pingreq') send({cmd: 'pingresp'});
             if (packet.cmd === 'subscribe') {
+                subscribed.push(...packet.subscriptions.map((entry) => entry.topic));
                 send({cmd: 'suback', messageId: packet.messageId, granted: packet.subscriptions.map(() => 0)});
                 if (packet.subscriptions.some((s) => s.topic === 'zigbee2mqtt/bridge/info')) {
                     publish('bridge/state', {state: 'online'});
@@ -119,7 +122,7 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
                 const request = JSON.parse(packet.payload);
                 requests.push({topic, request});
                 publish(`bridge/response/${topic}`, {transaction: request.transaction,
-                    status: topic === 'device/options' && rejectLayout ? 'error' : 'ok', error: 'Example failure', data: {}});
+                    status: (topic === 'device/options' && rejectLayout || topic === 'device/rename' && rejectRename) ? 'error' : 'ok', error: 'Example failure', data: {}});
             }
         });
     });
@@ -136,7 +139,7 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {origin: `http://127.0.0.1:${port}`});
     t.after(() => ws.terminate());
     await once(ws, 'open');
-    const save = async (id, layout) => {
+    const requestAction = async (id, op, args = {}) => {
         const reply = new Promise((resolve) => {
             const handler = (data) => {
                 const result = JSON.parse(data);
@@ -146,9 +149,10 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
             };
             ws.on('message', handler);
         });
-        ws.send(JSON.stringify({id, op: 'saveLayout', ieee, layout}));
+        ws.send(JSON.stringify({id, op, ieee, ...args}));
         return reply;
     };
+    const save = (id, layout) => requestAction(id, 'saveLayout', {layout});
     const layout = {zones: []};
     assert.equal((await save(1, layout)).ok, true);
     const persisted = async () => JSON.parse(await readFile(path.join(data, 'state.json'), 'utf8'));
@@ -156,4 +160,25 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
     rejectLayout = true;
     assert.equal((await save(2, {zones: [], targets_interval: 250})).ok, false);
     assert.deepEqual((await persisted()).layouts[ieee], normalize(layout));
+    rejectRename = true;
+    assert.equal((await requestAction(3, 'profile', {name: 'Office'})).ok, false);
+    assert.equal((await persisted()).profiles[ieee].name, undefined);
+    rejectRename = false;
+    assert.equal((await requestAction(4, 'profile', {name: 'Office'})).ok, true);
+    assert.equal((await persisted()).profiles[ieee].name, 'Office');
+    const rename = requests.filter((r) => r.topic === 'device/rename').at(-1).request;
+    assert.equal(rename.from, ieee); assert.equal(rename.to, 'Office'); assert.equal(rename.homeassistant_rename, false);
+    for (let i = 0; i < 20 && !subscribed.includes('zigbee2mqtt/Office'); i++) await delay(20);
+    assert.ok(subscribed.includes('zigbee2mqtt/Office'));
+    assert.equal((await requestAction(5, 'profile', {name: '  '})).ok, false);
+    assert.equal((await requestAction(6, 'permitJoin')).ok, true);
+    const known = {ieee_address: ieee, friendly_name: 'Office', model_id: 'lumi.models.4447_8295', interview_completed: true};
+    const added = {ieee_address: '0x0000000000000002', friendly_name: 'New sensor', model_id: 'lumi.models.4447_8295', interview_completed: false};
+    push('bridge/devices', [known, added]);
+    await requestAction(7, 'settings', {theme: 'auto'});
+    assert.equal(requests.filter((r) => r.topic === 'permit_join' && r.request.time === 0).length, 0);
+    added.interview_completed = true;
+    push('bridge/devices', [known, added]);
+    for (let i = 0; i < 50 && !requests.some((r) => r.topic === 'permit_join' && r.request.time === 0); i++) await delay(20);
+    assert.equal(requests.filter((r) => r.topic === 'permit_join' && r.request.time === 0).length, 1);
 });

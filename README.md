@@ -14,7 +14,7 @@ A Home Assistant app for setting up and managing multiple Aqara FP400 sensors in
 
 Requires Home Assistant OS/Supervisor on amd64 or aarch64, a configured MQTT broker, and Zigbee2MQTT 2.x with the converter MQTT API and Home Assistant MQTT discovery. FP400 must use Zigbee mode. Exact minimum HA/Z2M versions are not verified; device diagnostics were performed with Z2M 2.14.2.
 
-[Add this repository to Home Assistant](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FGERGto%2Fha-fp400-zones)
+[![Add this repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FGERGto%2Fha-fp400-zones)
 
 Or add `https://github.com/GERGto/ha-fp400-zones` under **Settings > Apps > App store > Repositories**. Install **FP400 Zones**, start it, and open its web UI. The container builds locally during installation. This is an app/add-on, not a HACS integration.
 

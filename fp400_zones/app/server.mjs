@@ -152,7 +152,7 @@ function snapshot() {
         baseTopic: BASE,
         converterVersion: CONVERTER_VERSION,
         autoSetup: AUTO_SETUP,
-        version: '1.2.0',
+        version: '1.2.1',
         settings: persisted.settings,
         connections: {mqtt: S.mqtt.status, z2m: S.bridge.state},
         permitJoinUntil: S.permitJoinUntil,
@@ -300,6 +300,7 @@ function onMessage(topic, buf) {
         for (const name of devicesSubscribed) if (!names.has(name)) client.unsubscribe(`${BASE}/${name}`);
         for (const name of names) if (!devicesSubscribed.has(name)) client.subscribe(`${BASE}/${name}`);
         devicesSubscribed = names;
+        closePairingIfComplete();
         return changed();
     }
     if (topic.startsWith(`${BASE}/bridge/response/`)) {
@@ -352,6 +353,23 @@ async function runAction(key, fn) {
     }
 }
 
+let joinSession = null;
+async function closePairingIfComplete() {
+    const session = joinSession;
+    if (!session || session.closing || S.permitJoinUntil <= Date.now()) return;
+    const paired = S.devices.some((d) => !session.known.has(d.ieee_address) && (d.interview_completed === true || d.interview_state === 'SUCCESSFUL'));
+    if (!paired) return;
+    session.closing = true;
+    try {
+        await actions.closeJoin();
+        log('info', 'New FP400 paired successfully; Zigbee2MQTT joining closed');
+    } catch (err) {
+        log('warn', 'Could not close joining after pairing: ' + err.message);
+        session.closing = false;
+    }
+}
+setInterval(closePairingIfComplete, 5000);
+
 const actions = {
     async mounting({ieee, mode, side, height}) {
         const d = requireDevice(ieee);
@@ -382,17 +400,34 @@ const actions = {
         workflow.tick(S.devices.filter(deviceUsesOurDefinition).map((d) => d.ieee_address), (id) => layoutFor(id).layout);
     },
     async profile({ieee, name, room, complete, mirror}) {
-        requireDevice(ieee);
+        const device = requireDevice(ieee);
         const patch = {};
         if (name !== undefined) {
             if (typeof name !== 'string' || name.length > 80) throw new Error('Use a name of up to 80 characters');
             patch.name = name.trim();
+            if (!patch.name || (/[+#]/.test(patch.name) || [...patch.name].some((c) => c.charCodeAt(0) < 32))) throw new Error('Use a non-empty name without MQTT wildcards or control characters');
         }
         if (mirror !== undefined) patch.mirror = Boolean(mirror);
         if (room !== undefined) patch.room = validateRoom(room);
         if (complete) {
             if (!workflow.profile(ieee).learnedAt || !patch.room) throw new Error('Complete room learning and boundary tracing first');
             patch.completedAt = Date.now();
+        }
+        if (patch.name !== undefined && patch.name !== device.friendly_name) {
+            return runAction('rename', async () => {
+                const previous = device.friendly_name;
+                await z2mRequest('device/rename', {from: ieee, to: patch.name, homeassistant_rename: false});
+                const current = requireDevice(ieee);
+                current.friendly_name = patch.name;
+                if (!devicesSubscribed.has(patch.name)) client.subscribe(BASE + '/' + patch.name);
+                devicesSubscribed.add(patch.name);
+                if (previous !== patch.name && devicesSubscribed.has(previous)) {
+                    client.unsubscribe(BASE + '/' + previous);
+                    devicesSubscribed.delete(previous);
+                }
+                log('info', 'Sensor renamed in Zigbee2MQTT; MQTT subscription updated');
+                return workflow.update(ieee, patch);
+            });
         }
         return workflow.update(ieee, patch);
     },
@@ -401,6 +436,7 @@ const actions = {
     async closeJoin() {
         await z2mRequest('permit_join', {time: 0});
         S.permitJoinUntil = 0;
+        joinSession = null;
         changed();
     },
     async enableExternalJs() {
@@ -435,8 +471,11 @@ const actions = {
         });
     },
     async permitJoin() {
+        const known = new Set(S.devices.map((d) => d.ieee_address));
         await z2mRequest('permit_join', {time: 254});
         S.permitJoinUntil = Date.now() + 254 * 1000;
+        joinSession = {known, closing: false};
+        closePairingIfComplete();
         log('info', 'Pairing enabled for 4 minutes');
         changed();
     },
@@ -651,7 +690,7 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-    log('info', `FP400 Zones 1.2.0 (converter ${CONVERTER_VERSION}) listening on port ${server.address().port} (${ADDON ? 'Home Assistant app' : 'Standalone'})`);
+    log('info', `FP400 Zones 1.2.1 (converter ${CONVERTER_VERSION}) listening on port ${server.address().port} (${ADDON ? 'Home Assistant app' : 'Standalone'})`);
     connectMqtt();
 });
 

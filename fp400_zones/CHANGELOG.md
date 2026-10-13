@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## 1.2.1
+
+- Official Add to Home Assistant repository button in the README.
+
+- Renaming a sensor in setup or the room editor now renames its Zigbee2MQTT friendly name after confirmation, and switches the app MQTT subscription. HA entity IDs are not explicitly renamed.
+- Joining closes automatically after a newly paired FP400 completes its interview. Known sensors and incomplete interviews do not close pairing. Failed closure is retried while the pairing window remains active.
+
 ## 1.2.0
 
 - Sensor-reported occupied zones are outlined in green.
