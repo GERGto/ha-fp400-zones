@@ -24,7 +24,7 @@ import {logger} from 'zigbee-herdsman-converters/lib/logger';
 const e = exposes.presets;
 const ea = exposes.access;
 
-const CONVERTER_VERSION = '1.3.4';
+const CONVERTER_VERSION = '1.3.4-ember1';
 const MFR = 0x115f;
 const MO = {manufacturerCode: MFR};
 const GRID_COLS = 16;
@@ -373,6 +373,14 @@ async function nativeZones(ep, layout, action, device) {
     }
     const back = await readNativeZones(ep);
     let sync = 'unreadable';
+    // Ember coordinators (EmberZNet NCP) can truncate the fragmented 0x0010 readback to 80 bytes, which makes the
+    // whole-array read fail with a RangeError although every appendZone command was accepted. In that case accept
+    // the write as unverified instead of rejecting a layout the sensor most likely stored.
+    const truncatedReadback = typeof back === 'string' && /out of range|truncat|boundsError/i.test(back);
+    if (truncatedReadback && action !== 'read' && errors.length === 0) {
+        sync = 'written_unverified';
+        logger.warning(`Native zone readback truncated by coordinator (${back}); zones were written but could not be read back. Test each zone by walking through it.`, 'zhc:fp400');
+    }
     if (Array.isArray(back)) {
         if (action === 'read') {
             sync = 'read';
@@ -382,7 +390,8 @@ async function nativeZones(ep, layout, action, device) {
             if (!ok && !errors.length) errors.push('Zone readback mismatch: requested ' + wanted.length + ', received ' + back.length + '. Sensor did not confirm identical IDs, masks and enabled flags.');
         }
     }
-    if (action === 'write' && sync === 'verified') {
+    const accepted = sync === 'verified' || sync === 'written_unverified';
+    if (action === 'write' && accepted) {
         // The global timeout can delay zone clearing even when each zone already uses 0 seconds.
         const confirmations = [{endpoint: 1, label: 'Global presence'},
             ...wanted.map((zone) => ({endpoint: zone.id + 2, label: `Zone ${zone.id}`}))];
@@ -401,8 +410,8 @@ async function nativeZones(ep, layout, action, device) {
         }
     }
     return {native_zones: Array.isArray(back) ? back.map((z) => ({id: z.id, enabled: z.enabled, cells: z.cells})) : [],
-        native_layout: sync === 'verified' ? wanted.map((z) => `${z.id}:${z.mask.toString('hex')}`).sort().join('|') : null,
-        native_sync: sync, native_errors: errors.length ? errors.slice(0, 4).join('; ') : (typeof back === 'string' ? back : null), native_encoding: 'zcl_members'};
+        native_layout: accepted ? wanted.map((z) => `${z.id}:${z.mask.toString('hex')}`).sort().join('|') : null,
+        native_sync: sync, native_errors: errors.length ? errors.slice(0, 4).join('; ') : (typeof back === 'string' && sync !== 'written_unverified' ? back : null), native_encoding: 'zcl_members'};
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -545,7 +554,7 @@ const tzFp400 = {
                 if (typeof request !== 'string' || request.length > 80 || !value.layout) throw new Error('Invalid sensor layout request');
                 try {
                     const result = await nativeZones(ep, parseLayout(value.layout), 'write', meta.device);
-                    if (result.native_sync !== 'verified') throw new Error(result.native_errors || 'Native zone readback does not match the requested layout');
+                    if (result.native_sync !== 'verified' && result.native_sync !== 'written_unverified') throw new Error(result.native_errors || 'Native zone readback does not match the requested layout');
                     for (const [key, name] of Object.entries(REGIONS)) {
                         const short = key.replace('region_', '');
                         await writeVerify(ep, name, T.OCTET, hexToMask(value.layout.regions?.[short] || '0'.repeat(80)));

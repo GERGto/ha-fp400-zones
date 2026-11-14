@@ -198,3 +198,43 @@ test('saving verifies global and all eight zone timeouts, including failures', a
         if (mode !== 'ok') assert.match(result.layout_error, mode.startsWith('global-') ? /Global presence absence confirmation/ : /Zone 4 absence confirmation/);
     }
 });
+
+test('Ember-truncated zone readback is accepted as written_unverified only when every write succeeded', async () => {
+    const {tzFp400, ATTR} = load();
+    const cells = '80' + '00'.repeat(39);
+    const zones = [1, 2].map(id => ({id, cells, enabled: true}));
+    const masks = new Map();
+    let readError = 'The value of "offset" is out of range. It must be >= 0 and <= 79. Received 110';
+    let failAppend = false;
+    const control = {
+        command: async (cluster, command) => { if (failAppend && command === 'appendZonePlain') throw new Error('Delivery failed'); },
+        write: async (cluster, attrs) => {
+            if (cluster === 'msOccupancySensing') return;
+            for (const [key, item] of Object.entries(attrs)) masks.set(Number(key), item.value);
+        },
+        read: async (cluster, names) => {
+            if (cluster === 'msOccupancySensing') return {3: 0};
+            if (names[0] === 'zones') throw new RangeError(readError);
+            return {[names[0]]: masks.get(ATTR[names[0]])};
+        },
+    };
+    const device = {getEndpoint: id => id === 1 ? control : {write: async () => {}, read: async () => ({3: 0})}};
+    const save = async (request) => (await tzFp400.convertSet(null, 'sensor_layout', {request, layout: {zones}}, {device})).state;
+
+    const truncated = await save('truncated');
+    assert.equal(truncated.layout_status, 'verified');
+    assert.equal(truncated.native_sync, 'written_unverified');
+    assert.equal(truncated.native_errors, null);
+    assert.ok(truncated.native_layout);
+
+    failAppend = true;
+    const appendFailure = await save('append-failure');
+    assert.equal(appendFailure.layout_status, 'failed');
+    assert.match(appendFailure.layout_error, /appendZonePlain: Delivery failed/);
+
+    failAppend = false;
+    readError = 'Timeout';
+    const timeout = await save('timeout');
+    assert.equal(timeout.layout_status, 'failed');
+    assert.match(timeout.layout_error, /Timeout/);
+});
