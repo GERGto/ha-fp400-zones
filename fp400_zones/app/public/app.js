@@ -15,8 +15,13 @@ const states = new Map();
 const device = () => snap?.devices.find((d) => d.ieee === current);
 const state = () => states.get(current) || device()?.state || {};
 const displayName = (d) => d.profile?.name || d.name;
-// The sensor's grid follows its confirmed mounting; fall back to the wizard choice while it reports unknown.
-const grid = () => { const m = state().install_mode; return gridMode(m === 'wall' || m === 'ceiling' ? m : mounting.mode); };
+// The sensor's grid follows its reported mounting, then the last mounting the app saw (device states are not
+// retained after a restart), then the wizard choice.
+const grid = () => {
+    const known = (m) => m === 'wall' || m === 'ceiling';
+    const m = [state().install_mode, device()?.profile?.installMode].find(known);
+    return gridMode(m ?? mounting.mode);
+};
 const button = (id, label, primary = false, disabled = false) => `<button id="${id}" class="${primary ? 'primary' : ''}" ${disabled ? 'disabled' : ''}>${label}</button>`;
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 6000); }
 function call(op, args = {}) {

@@ -226,7 +226,7 @@ async function connectMqtt() {
         S.mqtt = {status: 'connected', error: null, url: 'MQTT'};
         log('info', 'MQTT connected');
         client.subscribe([`${BASE}/bridge/state`, `${BASE}/bridge/info`, `${BASE}/bridge/devices`, `${BASE}/bridge/converters`, `${BASE}/bridge/response/#`]);
-        for (const d of S.devices) client.subscribe(`${BASE}/${d.friendly_name}`);
+        for (const d of S.devices) { client.subscribe(`${BASE}/${d.friendly_name}`); requestMounting(d); }
     });
     client.on('error', (err) => {
         S.mqtt.status = 'error';
@@ -300,7 +300,11 @@ function onMessage(topic, buf) {
         }
         const names = new Set(S.devices.map((d) => d.friendly_name));
         for (const name of devicesSubscribed) if (!names.has(name)) client.unsubscribe(`${BASE}/${name}`);
-        for (const name of names) if (!devicesSubscribed.has(name)) client.subscribe(`${BASE}/${name}`);
+        for (const d of S.devices) {
+            if (devicesSubscribed.has(d.friendly_name)) continue;
+            client.subscribe(`${BASE}/${d.friendly_name}`);
+            requestMounting(d);
+        }
         devicesSubscribed = names;
         closePairingIfComplete();
         return changed();
@@ -318,6 +322,10 @@ function onMessage(topic, buf) {
     const device = S.devices.find((d) => topic === `${BASE}/${d.friendly_name}`);
     if (device && msg && typeof msg === 'object') {
         S.states.set(device.ieee_address, msg);
+        // Device states are not retained on the broker; remember the mounting so the map is right after a restart.
+        if (['wall', 'ceiling'].includes(msg.install_mode) && workflow.profile(device.ieee_address).installMode !== msg.install_mode) {
+            workflow.update(device.ieee_address, {installMode: msg.install_mode});
+        }
         workflow.observe(device.ieee_address, msg);
         scheduleBroadcast();
         if (Array.isArray(msg.targets) && msg.targets.length) {
@@ -330,6 +338,14 @@ function onMessage(topic, buf) {
         }
         broadcast({type: 'state', ieee: device.ieee_address, state: msg});
     }
+}
+
+/** Ask the sensor for its mounting so the room map uses the right grid without waiting for a report. */
+function requestMounting(d) {
+    if (!deviceUsesOurDefinition(d)) return;
+    try {
+        publish(`${BASE}/${d.friendly_name}/get`, {install_mode: '', side_install: '', install_height: ''});
+    } catch { /* MQTT unavailable; the next connect retries. */ }
 }
 
 // ---------------------------------------------------------------------------------------------------------------

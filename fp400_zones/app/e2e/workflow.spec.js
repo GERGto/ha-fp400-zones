@@ -209,3 +209,13 @@ test('the fitted room view always includes drawn zones outside the traced outlin
     await page.getByRole('button', {name: 'Show full grid'}).click();
     await expect(page.locator('#mapScale')).toContainText('8.0 × 10.0 m');
 });
+
+test('the map uses the last known ceiling mounting before the sensor reports again', async ({page}) => {
+    const m = await mock(page);
+    const living = m.snapshot.devices.find((d) => d.ieee === 'sensor-a');
+    living.state = {};
+    living.profile = {completedAt: 1, installMode: 'ceiling'};
+    m.send(m.snapshot);
+    await page.getByRole('link', {name: /Living room/}).click();
+    await expect(page.locator('#mapScale')).toContainText('ceiling mount');
+});
