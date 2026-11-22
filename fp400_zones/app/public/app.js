@@ -219,7 +219,6 @@ function bind() {
         action('addZone', () => { undo.push(structuredClone(layout)); const z = addZone(layout); if (z) active = z.id; changed(); render(); $('map').scrollIntoView({block: 'center', behavior: 'smooth'}); });
         document.querySelectorAll('[data-zone]').forEach((el) => { el.onclick = (e) => { if (e.target.matches('input,button')) return; active = Number(el.dataset.zone); render(); }; });
         document.querySelectorAll('[data-name]').forEach((el) => { el.oninput = () => { layout.zones.find((z) => z.id === Number(el.dataset.name)).name = el.value; changed(); }; });
-        document.querySelectorAll('[data-delay]').forEach((el) => { el.onchange = () => { layout.zones.find((z) => z.id === Number(el.dataset.delay)).delay = Math.max(0, Math.min(600, Number(el.value) || 0)); changed(); }; });
         document.querySelectorAll('[data-delete]').forEach((el) => { el.onclick = () => { if (!confirm('Delete this zone from the draft? Save to apply the change.')) return; undo.push(structuredClone(layout)); layout.zones = layout.zones.filter((z) => z.id !== Number(el.dataset.delete)); active = layout.zones[0]?.id ?? null; changed(); render(); }; });
         document.querySelectorAll('[data-region]').forEach((el) => { el.onclick = () => { active = el.dataset.region; render(); }; });
         document.querySelectorAll('[data-tool]').forEach((el) => { el.onclick = () => { tool = el.dataset.tool; render(); }; });
@@ -308,8 +307,17 @@ function draw() {
         ctx.fillStyle = color('--accent'); ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = color('--card'); ctx.lineWidth = 3; ctx.stroke();
     }
+    if (view === 'editor' && painting && tool === 'rect') {
+        const {rows, cols} = rectSpan(painting.start, painting.last);
+        const a = xy((7 - cols[1]) * 50, (rows[1] + 1) * 50), z = xy((8 - cols[0]) * 50, rows[0] * 50);
+        ctx.strokeStyle = color('--accent'); ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+        ctx.strokeRect(Math.min(a[0], z[0]), Math.min(a[1], z[1]), Math.abs(z[0] - a[0]), Math.abs(z[1] - a[1])); ctx.setLineDash([]);
+    }
     const [sx, sy] = xy(0, 0); if (sy <= height && sy >= 0) { ctx.fillStyle = color('--primary'); ctx.fillRect(sx - 10, sy - 5, 20, 10); }
     if ($('mapScale')) $('mapScale').textContent = `${((b.maxX - b.minX) / 100).toFixed(1)} × ${((b.maxY - b.minY) / 100).toFixed(1)} m · 50 cm cells`;
+}
+function rectSpan(a, b) {
+    return {rows: [Math.min(a >> 4, b >> 4), Math.max(a >> 4, b >> 4)], cols: [Math.min(a % 16, b % 16), Math.max(a % 16, b % 16)]};
 }
 function bindCanvas() {
     const cv = $('map');
@@ -320,22 +328,25 @@ function bindCanvas() {
         const y = t.b.minY + (t.height - t.oy - (e.clientY - r.top)) / t.scale;
         return cellAt(x, y);
     };
-    const apply = (bit) => { if (bit === null || !selectedMask()) return; setMask(maskSet(selectedMask(), bit, tool !== 'erase')); changed(); };
+    const apply = (bit, commit = true) => { if (bit === null || !selectedMask()) return; setMask(maskSet(selectedMask(), bit, tool !== 'erase')); if (commit) changed(); };
     cv.onpointerdown = (e) => {
         if (view !== 'editor' || active === null) return;
         const bit = bitFor(e); if (bit === null) return;
         cv.setPointerCapture(e.pointerId); undo.push(structuredClone(layout)); if (undo.length > 40) undo.shift();
         painting = {start: bit, last: bit}; if (tool !== 'rect') apply(bit);
     };
-    cv.onpointermove = (e) => { if (!painting) return; const bit = bitFor(e); if (bit === null) return; painting.last = bit; if (tool !== 'rect') apply(bit); };
+    cv.onpointermove = (e) => { if (!painting) return; const bit = bitFor(e); if (bit === null || bit === painting.last) return; painting.last = bit; if (tool !== 'rect') apply(bit); else draw(); };
     cv.onpointerup = () => {
         if (painting && tool === 'rect') {
-            const a = painting.start, b = painting.last;
-            for (let row = Math.min(a >> 4, b >> 4); row <= Math.max(a >> 4, b >> 4); row++) for (let col = Math.min(a % 16, b % 16); col <= Math.max(a % 16, b % 16); col++) apply(row * 16 + col);
+            const {rows, cols} = rectSpan(painting.start, painting.last);
+            for (let row = rows[0]; row <= rows[1]; row++) for (let col = cols[0]; col <= cols[1]; col++) apply(row * 16 + col, false);
+            painting = null;
+            changed();
+            return;
         }
         painting = null;
     };
-    cv.onpointercancel = () => { painting = null; };
+    cv.onpointercancel = () => { painting = null; draw(); };
     cv.oncontextmenu = (e) => e.preventDefault();
 }
 window.addEventListener('resize', draw);

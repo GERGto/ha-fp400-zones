@@ -182,3 +182,31 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
     for (let i = 0; i < 50 && !requests.some((r) => r.topic === 'permit_join' && r.request.time === 0); i++) await delay(20);
     assert.equal(requests.filter((r) => r.topic === 'permit_join' && r.request.time === 0).length, 1);
 });
+
+test('snapshot reports the package version, responses carry security headers, raw MQTT actions are not exposed', {timeout: 15000}, async (t) => {
+    const {port} = await start(t);
+    const origin = `http://127.0.0.1:${port}`;
+    const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+    const page = await fetch(origin);
+    assert.equal(page.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {origin});
+    t.after(() => ws.terminate());
+    const [first] = await once(ws, 'message');
+    const snapshot = JSON.parse(first);
+    assert.equal(snapshot.type, 'snapshot');
+    assert.equal(snapshot.version, pkg.version);
+    for (const [id, op] of [[1, 'set'], [2, 'get']]) {
+        const reply = new Promise((resolve) => {
+            const onMessage = (data) => {
+                const result = JSON.parse(data);
+                if (result.type !== 'result' || result.id !== id) return;
+                ws.off('message', onMessage);
+                resolve(result);
+            };
+            ws.on('message', onMessage);
+        });
+        ws.send(JSON.stringify({id, op, ieee: '0x0000000000000001', payload: {install_mode: 'wall'}}));
+        assert.deepEqual(await reply, {type: 'result', id, ok: false, error: 'Invalid request'});
+    }
+});
