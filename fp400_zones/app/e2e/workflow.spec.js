@@ -177,7 +177,8 @@ test('ceiling mounting traces behind the sensor and draws zones on the centred g
     expect(Math.max(...outline.map((p) => p.y))).toBeGreaterThan(50);
     await page.getByRole('button', {name: /Create your first zone/}).click();
     await expect(page.locator('#mapScale')).toContainText('ceiling mount');
-    await page.getByRole('button', {name: 'Fit room'}).click();
+    await page.getByRole('button', {name: 'Show full grid'}).click();
+    await expect(page.getByRole('button', {name: 'Fit room'})).toBeVisible();
     await page.locator('#map').scrollIntoViewIfNeeded();
     const box = await page.locator('#map').boundingBox();
     await page.getByRole('button', {name: 'Rectangle', exact: true}).click();
@@ -191,4 +192,20 @@ test('ceiling mounting traces behind the sensor and draws zones on the centred g
     expect(rows.length).toBeGreaterThan(0);
     expect(Math.max(...rows)).toBeLessThan(10);
     expect(errors).toEqual([]);
+});
+
+test('the fitted room view always includes drawn zones outside the traced outline', async ({page}) => {
+    const m = await mock(page);
+    const living = m.snapshot.devices.find((d) => d.ieee === 'sensor-a');
+    living.state = {install_mode: 'ceiling', side_install: 'wall', install_height: 3500};
+    // A small outline traced before ceiling support, plus a saved zone in row 2 (y -400..-350) behind the sensor.
+    living.profile = {completedAt: 1, room: {outline: [{x: -300, y: 0}, {x: 300, y: 0}, {x: 0, y: 150}]}};
+    const cells = '00'.repeat(4) + '0180' + '00'.repeat(34);
+    living.layout = {zones: [{id: 1, name: 'Couch', enabled: true, cells}]};
+    m.send(m.snapshot);
+    m.send({type: 'state', ieee: 'sensor-a', state: living.state});
+    await page.getByRole('link', {name: /Living room/}).click();
+    await expect(page.locator('#mapScale')).toContainText('7.0 × 6.5 m · 50 cm cells · ceiling mount');
+    await page.getByRole('button', {name: 'Show full grid'}).click();
+    await expect(page.locator('#mapScale')).toContainText('8.0 × 10.0 m');
 });
