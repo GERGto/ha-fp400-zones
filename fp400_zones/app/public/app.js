@@ -1,4 +1,4 @@
-import {COLORS, REGIONS, esc, normalize, addZone, emptyMask, maskHas, maskSet, cellAt, envelope, bounds} from './model.js';
+import {COLORS, REGIONS, esc, normalize, addZone, emptyMask, maskHas, maskSet, cellAt, cellOrigin, envelope, bounds, gridMode} from './model.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -15,6 +15,8 @@ const states = new Map();
 const device = () => snap?.devices.find((d) => d.ieee === current);
 const state = () => states.get(current) || device()?.state || {};
 const displayName = (d) => d.profile?.name || d.name;
+// The sensor's grid follows its confirmed mounting; fall back to the wizard choice while it reports unknown.
+const grid = () => { const m = state().install_mode; return gridMode(m === 'wall' || m === 'ceiling' ? m : mounting.mode); };
 const button = (id, label, primary = false, disabled = false) => `<button id="${id}" class="${primary ? 'primary' : ''}" ${disabled ? 'disabled' : ''}>${label}</button>`;
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 6000); }
 function call(op, args = {}) {
@@ -58,7 +60,7 @@ function connect() {
             if (msg.ieee === current && view === 'setup' && step === 3 && (!msg.state.targets_updated_at || Date.now() - msg.state.targets_updated_at < 15000)) {
                 // Ignore duplicate cached coordinates from unrelated sensor reports.
                 for (const p of msg.state.targets || []) {
-                    if (cellAt(p.x, p.y) === null) continue;
+                    if (cellAt(p.x, p.y, grid()) === null) continue;
                     if (!trace.length || Math.hypot(p.x - trace.at(-1).x, p.y - trace.at(-1).y) > 8) trace.push({x: p.x, y: p.y});
                 }
                 if (trace.length > 4000) trace = trace.filter((_, i) => i % 2 === 0);
@@ -211,9 +213,9 @@ function bind() {
         action('cancelLearn', () => call('cancelLearn', {ieee: current}));
         action('resetTrace', () => { trace = []; pass = 1; traceStart = 0; render(); });
         action('lap', async () => {
-            if (trace.length - traceStart < 10 || envelope(trace.slice(traceStart)).length < 3) throw new Error('Walk around more of the room before confirming this lap.');
+            if (trace.length - traceStart < 10 || envelope(trace.slice(traceStart), grid()).length < 3) throw new Error('Walk around more of the room before confirming this lap.');
             if (pass === 1) { pass = 2; traceStart = trace.length; render(); return; }
-            device().profile = await call('profile', {ieee: current, room: {outline: envelope(trace)}, complete: true});
+            device().profile = await call('profile', {ieee: current, room: {outline: envelope(trace, grid())}, complete: true});
             view = 'editor'; location.hash = `#/device/${encodeURIComponent(current)}`; render(); watch();
         });
     }
@@ -268,7 +270,7 @@ function refreshLive() {
         $('learnStatus').textContent = left !== null ? 'Leave the room now' : job?.status === 'learning' ? 'Learning… stay outside until confirmation' : job?.status === 'complete' ? 'Confirmed by the sensor. You can enter the room.' : 'Ready when you are';
         $('learnProgress').style.width = `${job?.status === 'complete' ? 100 : Math.min(99, elapsed / 120 * 100)}%`;
     }
-    if ($('roomSize')) { const b = bounds(envelope(trace)); $('roomSize').textContent = `Estimated extent: ${((b.maxX - b.minX) / 100).toFixed(1)} × ${((b.maxY - b.minY) / 100).toFixed(1)} m · ${trace.length} samples`; }
+    if ($('roomSize')) { const b = bounds(envelope(trace, grid()), grid()); $('roomSize').textContent = `Estimated extent: ${((b.maxX - b.minX) / 100).toFixed(1)} × ${((b.maxY - b.minY) / 100).toFixed(1)} m · ${trace.length} samples`; }
     draw();
 }
 setInterval(refreshLive, 1000);
@@ -285,8 +287,9 @@ function draw() {
     cv.width = width * dpr; cv.height = height * dpr;
     const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr);
     const style = getComputedStyle(document.documentElement), color = (k) => style.getPropertyValue(k).trim();
-    const outline = view === 'setup' ? envelope(trace) : device().profile?.room?.outline;
-    const b = bounds(view === 'setup' || fullGrid ? null : outline);
+    const mode = grid();
+    const outline = view === 'setup' ? envelope(trace, mode) : device().profile?.room?.outline;
+    const b = bounds(view === 'setup' || fullGrid ? null : outline, mode);
     const scale = Math.min((width - 36) / (b.maxX - b.minX), (height - 36) / (b.maxY - b.minY));
     const ox = (width - (b.maxX - b.minX) * scale) / 2, oy = (height - (b.maxY - b.minY) * scale) / 2;
     const mirror = !!device().profile?.mirror;
@@ -298,7 +301,7 @@ function draw() {
     const fill = (mask, c, hatch = false) => {
         for (let bit = 0; bit < 320; bit++) {
             if (!maskHas(mask, bit)) continue;
-            const col = bit % 16, row = Math.floor(bit / 16), x = (7 - col) * 50, y = row * 50;
+            const {x, y} = cellOrigin(bit, mode);
             if (x < b.minX || x >= b.maxX || y < b.minY || y >= b.maxY) continue;
             const a = xy(x, y + 50), z = xy(x + 50, y);
             ctx.globalAlpha = .27; ctx.fillStyle = c; ctx.fillRect(Math.min(a[0], z[0]), a[1], 50 * scale, 50 * scale);
@@ -319,12 +322,13 @@ function draw() {
     }
     if (view === 'editor' && painting && isRect()) {
         const {rows, cols} = rectSpan(painting.start, painting.last);
-        const a = xy((7 - cols[1]) * 50, (rows[1] + 1) * 50), z = xy((8 - cols[0]) * 50, rows[0] * 50);
+        const low = cellOrigin(rows[0] * 16 + cols[1], mode), high = cellOrigin(rows[1] * 16 + cols[0], mode);
+        const a = xy(low.x, high.y + 50), z = xy(high.x + 50, low.y);
         ctx.strokeStyle = tool === 'rectErase' ? color('--danger') : color('--accent'); ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
         ctx.strokeRect(Math.min(a[0], z[0]), Math.min(a[1], z[1]), Math.abs(z[0] - a[0]), Math.abs(z[1] - a[1])); ctx.setLineDash([]);
     }
     const [sx, sy] = xy(0, 0); if (sy <= height && sy >= 0) { ctx.fillStyle = color('--primary'); ctx.fillRect(sx - 10, sy - 5, 20, 10); }
-    if ($('mapScale')) $('mapScale').textContent = `${((b.maxX - b.minX) / 100).toFixed(1)} × ${((b.maxY - b.minY) / 100).toFixed(1)} m · 50 cm cells`;
+    if ($('mapScale')) $('mapScale').textContent = `${((b.maxX - b.minX) / 100).toFixed(1)} × ${((b.maxY - b.minY) / 100).toFixed(1)} m · 50 cm cells${mode === 'ceiling' ? ' · ceiling mount' : ''}`;
 }
 function rectSpan(a, b) {
     return {rows: [Math.min(a >> 4, b >> 4), Math.max(a >> 4, b >> 4)], cols: [Math.min(a % 16, b % 16), Math.max(a % 16, b % 16)]};
@@ -336,7 +340,7 @@ function bindCanvas() {
         const r = cv.getBoundingClientRect(), t = transform;
         const x = t.mirror ? t.b.maxX - (e.clientX - r.left - t.ox) / t.scale : t.b.minX + (e.clientX - r.left - t.ox) / t.scale;
         const y = t.b.minY + (t.height - t.oy - (e.clientY - r.top)) / t.scale;
-        return cellAt(x, y);
+        return cellAt(x, y, grid());
     };
     const apply = (bit, commit = true) => { if (bit === null || !selectedMask()) return; setMask(maskSet(selectedMask(), bit, !isErase())); if (commit) changed(); };
     cv.onpointerdown = (e) => {

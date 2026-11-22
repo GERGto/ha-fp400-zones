@@ -20,9 +20,21 @@ export function maskSet(hex, bit, on) {
     byte = on ? byte | (128 >> (bit & 7)) : byte & ~(128 >> (bit & 7));
     return hex.slice(0, at) + byte.toString(16).padStart(2, '0') + hex.slice(at + 2);
 }
-export function cellAt(x, y) {
-    const col = Math.floor(8 - x / 50), row = Math.floor(y / 50);
+// Sensor grid: 16 columns x 20 rows of 50 cm cells, x in cm (+x = left of the sensor's view), y in cm.
+// Wall mounting: row 0 starts at the sensor (y 0..1000). Ceiling mounting: the grid is centred on the
+// sensor (y -500..500), verified on hardware by zone occupancy on both sides of y = 0.
+export const gridMode = (mode) => mode === 'ceiling' ? 'ceiling' : 'wall';
+export function gridBounds(mode) {
+    const minY = gridMode(mode) === 'ceiling' ? -500 : 0;
+    return {minX: -400, maxX: 400, minY, maxY: minY + 1000};
+}
+export function cellAt(x, y, mode = 'wall') {
+    const col = Math.floor(8 - x / 50), row = Math.floor((y - gridBounds(mode).minY) / 50);
     return col >= 0 && col < 16 && row >= 0 && row < 20 ? row * 16 + col : null;
+}
+/** Lower-left corner (smallest x and y, in cm) of a grid cell. */
+export function cellOrigin(bit, mode = 'wall') {
+    return {x: (7 - (bit % 16)) * 50, y: Math.floor(bit / 16) * 50 + gridBounds(mode).minY};
 }
 export function addZone(layout) {
     const id = Array.from({length: 8}, (_, i) => i + 1).find((i) => !layout.zones.some((z) => z.id === i));
@@ -31,18 +43,19 @@ export function addZone(layout) {
     const zone = {id, name: `Zone ${id}`, enabled: true, delay: 0, cells: emptyMask()};
     layout.zones.push(zone); return zone;
 }
-export function envelope(points) {
-    const sorted = [...new Map(points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y) && cellAt(p.x, p.y) !== null)
+export function envelope(points, mode = 'wall') {
+    const sorted = [...new Map(points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y) && cellAt(p.x, p.y, mode) !== null)
         .map((p) => [`${Math.round(p.x)},${Math.round(p.y)}`, {x: Math.round(p.x), y: Math.round(p.y)}])).values()].sort((a, b) => a.x - b.x || a.y - b.y);
     if (sorted.length < 3) return sorted;
     const cross = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
     const half = (ps) => { const h = []; for (const p of ps) { while (h.length > 1 && cross(h.at(-2), h.at(-1), p) <= 0) h.pop(); h.push(p); } return h; };
     return [...half(sorted).slice(0, -1), ...half([...sorted].reverse()).slice(0, -1)];
 }
-export function bounds(points) {
-    if (!points?.length) return {minX: -400, maxX: 400, minY: 0, maxY: 1000};
-    return {minX: Math.max(-400, Math.floor((Math.min(...points.map((p) => p.x)) - 50) / 50) * 50),
-        maxX: Math.min(400, Math.ceil((Math.max(...points.map((p) => p.x)) + 50) / 50) * 50),
-        minY: Math.max(0, Math.floor((Math.min(...points.map((p) => p.y)) - 50) / 50) * 50),
-        maxY: Math.min(1000, Math.ceil((Math.max(...points.map((p) => p.y)) + 50) / 50) * 50)};
+export function bounds(points, mode = 'wall') {
+    const grid = gridBounds(mode);
+    if (!points?.length) return grid;
+    return {minX: Math.max(grid.minX, Math.floor((Math.min(...points.map((p) => p.x)) - 50) / 50) * 50),
+        maxX: Math.min(grid.maxX, Math.ceil((Math.max(...points.map((p) => p.x)) + 50) / 50) * 50),
+        minY: Math.max(grid.minY, Math.floor((Math.min(...points.map((p) => p.y)) - 50) / 50) * 50),
+        maxY: Math.min(grid.maxY, Math.ceil((Math.max(...points.map((p) => p.y)) + 50) / 50) * 50)};
 }

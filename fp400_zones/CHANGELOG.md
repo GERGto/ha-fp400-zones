@@ -7,6 +7,7 @@
 - Web UI responses send `X-Content-Type-Options`, `Referrer-Policy` and a Content Security Policy.
 - Rectangle tool shows a live outline while dragging and commits the area as a single change instead of one draft write per cell.
 - New **Erase rectangle** tool clears a rectangular part of the selected zone or obstacle area in one drag, with a red live outline.
+- **Ceiling mounting:** the room map, boundary tracing and zone drawing now use the sensor's centred ceiling grid (y from -5 to +5 m, sensor in the middle) instead of the wall grid (y from 0 to 10 m). Before, every position behind the sensor was discarded and zones were drawn in the wrong rows. The mapping was verified on a ceiling-mounted FP400 with test zones on both sides of the sensor. Ceiling rooms traced or drawn with an older version should be traced and drawn again.
 - Setup wizard no longer fails with "Invalid mounting settings" when the sensor reports `unknown` mounting values or a height of 0; it starts from valid defaults. Mounting errors now name the invalid field, and the wall position is only checked for wall mounting.
 - New zones default to a 0-second delay, matching the value written to the sensor on save. Removed unused delay handling.
 

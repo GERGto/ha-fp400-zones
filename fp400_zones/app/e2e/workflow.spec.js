@@ -151,3 +151,44 @@ test('mounting wizard starts from valid values when the sensor reports unknown s
     await page.getByRole('button', {name: 'Continue', exact: true}).click();
     await expect.poll(() => m.requests.find((r) => r.op === 'mounting')).toMatchObject({mode: 'ceiling', side: 'wall', height: 3500});
 });
+
+test('ceiling mounting traces behind the sensor and draws zones on the centred grid', async ({page}) => {
+    const errors = []; page.on('pageerror', (e) => errors.push(e.message));
+    const m = await mock(page);
+    const office = m.snapshot.devices.find((d) => d.ieee === 'sensor-b');
+    office.state = {install_mode: 'ceiling', side_install: 'wall', install_height: 3500};
+    office.learning = {status: 'complete'};
+    m.send(m.snapshot);
+    await page.getByRole('link', {name: /Office/}).click();
+    for (let i = 0; i < 2; i++) await page.getByRole('button', {name: 'Continue', exact: true}).click();
+    await page.getByRole('button', {name: 'Enter room and trace'}).click();
+    const lap = [];
+    for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * 2 * Math.PI;
+        lap.push({x: Math.round(180 * Math.cos(a)), y: Math.round(-170 + 280 * Math.sin(a))});
+    }
+    for (const p of lap) m.send({type: 'state', ieee: 'sensor-b', state: {...office.state, targets: [{id: 1, ...p}], targets_updated_at: Date.now()}});
+    await expect(page.locator('#roomSize')).toContainText('24 samples');
+    await page.getByRole('button', {name: 'First lap complete'}).click();
+    for (const p of lap) m.send({type: 'state', ieee: 'sensor-b', state: {...office.state, targets: [{id: 1, x: p.x + 3, y: p.y + 3}], targets_updated_at: Date.now()}});
+    await page.getByRole('button', {name: 'Confirm both laps'}).click();
+    const outline = m.requests.find((r) => r.op === 'profile' && r.complete).room.outline;
+    expect(Math.min(...outline.map((p) => p.y))).toBeLessThan(-400);
+    expect(Math.max(...outline.map((p) => p.y))).toBeGreaterThan(50);
+    await page.getByRole('button', {name: /Create your first zone/}).click();
+    await expect(page.locator('#mapScale')).toContainText('ceiling mount');
+    await page.getByRole('button', {name: 'Fit room'}).click();
+    await page.locator('#map').scrollIntoViewIfNeeded();
+    const box = await page.locator('#map').boundingBox();
+    await page.getByRole('button', {name: 'Rectangle', exact: true}).click();
+    // Full ceiling grid: below the map centre is y < 0, behind the sensor (above any sticky save bar).
+    await page.mouse.move(box.x + box.width / 2 - 20, box.y + box.height * 0.7); await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height * 0.65, {steps: 3}); await page.mouse.up();
+    await page.getByRole('button', {name: 'Save changes'}).click();
+    await expect.poll(() => m.requests.find((r) => r.op === 'saveLayout')?.layout.zones[0].cells).toBeTruthy();
+    const cells = m.requests.find((r) => r.op === 'saveLayout').layout.zones[0].cells;
+    const rows = [...Array(320).keys()].filter((bit) => (parseInt(cells.slice((bit >> 3) * 2, (bit >> 3) * 2 + 2), 16) & (128 >> (bit & 7)))).map((bit) => bit >> 4);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(Math.max(...rows)).toBeLessThan(10);
+    expect(errors).toEqual([]);
+});

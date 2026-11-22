@@ -36,4 +36,6 @@ test('room metadata rejects invalid or oversized traces', () => {
     assert.throws(() => validateRoom({outline: []}));
     assert.throws(() => validateRoom({outline: [{x: 0, y: 0}, {x: 900, y: 0}, {x: 0, y: 100}]}));
     assert.equal(validateRoom({outline: [{x: 0, y: 0}, {x: 100, y: 0}, {x: 0, y: 100}]}).passes, 2);
+    assert.equal(validateRoom({outline: [{x: 0, y: -300}, {x: 100, y: 0}, {x: 0, y: 100}]}).passes, 2);
+    assert.throws(() => validateRoom({outline: [{x: 0, y: -600}, {x: 100, y: 0}, {x: 0, y: 100}]}));
 });

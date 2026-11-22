@@ -12,6 +12,8 @@ Manage your FP400 sensors from one dashboard. Each tile shows presence, zone cou
 6. Enter alone and walk the room boundary twice. Live points form an approximate outer envelope. Confirm the first lap and then both laps manually. You can restart tracing. This estimates the walked area, not actual walls or recesses.
 7. Create your first zone. New rooms have no pre-created zones. Name the zone, select Draw or Rectangle, and drag on the grid. Use Erase, Erase rectangle or Undo to correct it, then **Save changes**.
 
+With ceiling mounting the sensor sits in the middle of the map: its grid covers 5 m in each direction along y and 4 m to each side, and positions behind the sensor have negative y. With wall mounting the grid starts at the sensor and extends 10 m into the room. Changing the mounting type changes where existing zones lie, so redraw and save them afterwards.
+
 The physical grid stays at 50 cm per cell; the view fits the estimated room. Mirror view changes only the display orientation. **Run setup** repeats the wizard later while preserving zones. Existing installations with saved zones bypass automatic onboarding.
 
 ## Zones and obstacles

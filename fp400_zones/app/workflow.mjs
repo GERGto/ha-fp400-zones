@@ -84,6 +84,6 @@ export class Workflow {
 
 export function validateRoom(room) {
     if (!room || !Array.isArray(room.outline) || room.outline.length < 3 || room.outline.length > 1000) throw new Error('Walk the room boundary before continuing');
-    if (!room.outline.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= -400 && p.x <= 400 && p.y >= 0 && p.y <= 1000)) throw new Error('Room outline is outside the supported sensor grid');
+    if (!room.outline.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= -400 && p.x <= 400 && p.y >= -500 && p.y <= 1000)) throw new Error('Room outline is outside the supported sensor grid');
     return {outline: room.outline.map(({x, y}) => ({x, y})), passes: 2};
 }
