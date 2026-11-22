@@ -92,6 +92,7 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
     let rejectLayout = false, rejectRename = false, push;
     const subscribed = [];
     const gets = [];
+    const mountings = [];
     const broker = net.createServer((socket) => {
         clients.add(socket);
         socket.on('close', () => clients.delete(socket));
@@ -115,6 +116,16 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
                 }
             }
             if (packet.cmd === 'publish' && packet.topic.endsWith('/get')) gets.push([packet.topic, JSON.parse(packet.payload)]);
+            if (packet.cmd === 'publish' && packet.topic.endsWith('/Example sensor/set') && JSON.parse(packet.payload).mounting) {
+                const mounting = JSON.parse(packet.payload).mounting;
+                // A report whose values already match, but without the request ID, must not confirm the write.
+                publish('Example sensor', {install_mode: mounting.mode, install_height: mounting.height, presence: true});
+                const failed = mounting.height === 4000;
+                setTimeout(() => publish('Example sensor', {install_mode: mounting.mode, install_height: mounting.height,
+                    mounting_request: mounting.request, mounting_status: failed ? 'failed' : 'verified',
+                    mounting_error: failed ? 'installHeight readback mismatch (wrote 4000, read 0)' : null}), 300);
+                mountings.push(mounting);
+            }
             if (packet.cmd === 'publish' && packet.topic.endsWith('/Example sensor/set')) {
                 const request = JSON.parse(packet.payload).sensor_layout;
                 if (request) publish('Example sensor', {layout_request: request.request, layout_status: rejectLayout ? 'failed' : 'verified', layout_error: 'Example sensor failure'});
@@ -163,6 +174,13 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
         ws.send(JSON.stringify({id, op, ieee, ...args}));
         return reply;
     };
+    const mounted = await requestAction(10, 'mounting', {mode: 'ceiling', side: 'unknown', height: 3500});
+    assert.equal(mounted.ok, true);
+    assert.equal(mountings[0].side, undefined);
+    assert.match(mountings[0].request, /^[0-9a-f-]{36}$/);
+    const rejected = await requestAction(11, 'mounting', {mode: 'ceiling', height: 4000});
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error, /did not accept the mounting: installHeight readback mismatch/);
     const save = (id, layout) => requestAction(id, 'saveLayout', {layout});
     const layout = {zones: []};
     assert.equal((await save(1, layout)).ok, true);

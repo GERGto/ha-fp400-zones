@@ -247,3 +247,37 @@ test('reconfiguration keeps an existing mounting setup and only initialises a bl
         assert.equal(writes.length, expected);
     }
 });
+
+test('mounting writes and reads back each value and answers with the request ID', async () => {
+    const {tzFp400, ATTR} = load();
+    const stored = new Map();
+    let corrupt = null;
+    const writes = [];
+    const ep = {
+        write: async (cluster, attrs) => { for (const [id, item] of Object.entries(attrs)) { writes.push(Number(id)); stored.set(Number(id), item.value); } },
+        read: async (cluster, [name]) => ({[name]: corrupt === name ? 0 : stored.get(ATTR[name])}),
+    };
+    const meta = {device: {getEndpoint: () => ep}};
+    const wall = (await tzFp400.convertSet(null, 'mounting', {request: 'r1', mode: 'wall', side: 'left_corner', height: 2400}, meta)).state;
+    assert.equal(writes.join(), [ATTR.installMode, ATTR.sideInstall, ATTR.installHeight].join());
+    assert.equal(wall.mounting_request, 'r1');
+    assert.equal(wall.mounting_status, 'verified');
+    assert.equal(wall.side_install, 'left_corner');
+    assert.equal(stored.get(ATTR.installMode), 1);
+    writes.length = 0;
+    const ceiling = (await tzFp400.convertSet(null, 'mounting', {request: 'r2', mode: 'ceiling', side: 'unknown', height: 3500}, meta)).state;
+    assert.equal(writes.join(), [ATTR.installMode, ATTR.installHeight].join());
+    assert.equal(ceiling.mounting_status, 'verified');
+    assert.equal(ceiling.install_mode, 'ceiling');
+    assert.equal(ceiling.install_height, 3500);
+    corrupt = 'installHeight';
+    const mismatch = (await tzFp400.convertSet(null, 'mounting', {request: 'r3', mode: 'ceiling', height: 3500}, meta)).state;
+    assert.equal(mismatch.mounting_request, 'r3');
+    assert.equal(mismatch.mounting_status, 'failed');
+    assert.match(mismatch.mounting_error, /installHeight readback mismatch/);
+    corrupt = null;
+    for (const value of [{request: 'r4', mode: 'toString', height: 3500}, {request: 'r5', mode: 'wall', side: 'toString', height: 3500}, {request: 'r6', mode: 'ceiling', height: 50}]) {
+        assert.equal((await tzFp400.convertSet(null, 'mounting', value, meta)).state.mounting_status, 'failed');
+    }
+    await assert.rejects(tzFp400.convertSet(null, 'mounting', {mode: 'ceiling', height: 3500}, meta), /Invalid mounting request/);
+});

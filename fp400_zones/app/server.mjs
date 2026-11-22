@@ -395,18 +395,12 @@ const actions = {
         if (!['wall', 'ceiling'].includes(mode)) throw new Error('Invalid mounting type. Choose wall or ceiling.');
         if (mode === 'wall' && !['wall', 'left_corner', 'right_corner'].includes(side)) throw new Error('Invalid wall position. Choose flat wall, left corner or right corner.');
         if (!Number.isInteger(height) || height < 100 || height > 5000) throw new Error('Mounting height must be between 0.1 and 5 m.');
-        for (const [key, value] of Object.entries({install_mode: mode, ...(mode === 'wall' ? {side_install: side} : {}), install_height: height})) {
-            const previous = S.states.get(ieee);
-            publish(`${BASE}/${d.friendly_name}/set`, {[key]: value});
-            await new Promise((resolve, reject) => {
-                const deadline = Date.now() + 25000;
-                const timer = setInterval(() => {
-                    const state = S.states.get(ieee);
-                    if (state !== previous && state?.[key] === value) { clearInterval(timer); resolve(); }
-                    else if (Date.now() >= deadline) { clearInterval(timer); reject(new Error(`Sensor did not confirm ${key}. Check Zigbee2MQTT logs.`)); }
-                }, 200);
-            });
-        }
+        if (!deviceUsesOurDefinition(d) || ourConverter()?.code !== CONVERTER_CODE) throw new Error('Wait for the current converter to finish installing before setting the mounting');
+        const request = crypto.randomUUID();
+        publish(`${BASE}/${d.friendly_name}/set`, {mounting: {request, mode, ...(mode === 'wall' ? {side} : {}), height}});
+        const result = await sensorResult(ieee, 'mounting', request, 30000);
+        if (result.status === 'timeout') throw new Error('The sensor did not confirm the mounting. Check Zigbee2MQTT logs and retry.');
+        if (result.status !== 'verified') throw new Error(`The sensor did not accept the mounting: ${result.state.mounting_error || 'unknown error'}`);
     },
     async settings({theme}) {
         if (!['auto', 'light', 'dark'].includes(theme)) throw new Error('Invalid theme');
@@ -519,23 +513,10 @@ const actions = {
             const request = crypto.randomUUID();
             log('info', 'Writing zones and obstacle masks to sensor; waiting for readback');
             publish(BASE + '/' + d.friendly_name + '/set', {sensor_layout: {request, layout}});
-            await new Promise((resolve, reject) => {
-                const deadline = Date.now() + 75000;
-                const timer = setInterval(() => {
-                    const state = S.states.get(ieee);
-                    if (state?.layout_request === request) {
-                        clearInterval(timer);
-                        if (state.layout_status === 'verified') {
-                            if (state.native_verification === 'acknowledged') log('info', 'Zone table too large to read back over this coordinator; every zone command was confirmed by the sensor instead');
-                            resolve();
-                        }
-                        else reject(new Error(state.layout_error || 'Sensor layout verification failed. Re-save the complete layout to retry.'));
-                    } else if (Date.now() >= deadline) {
-                        clearInterval(timer);
-                        reject(new Error('No sensor confirmation. The sensor may be partially updated; re-save the complete layout to retry.'));
-                    }
-                }, 100);
-            });
+            const result = await sensorResult(ieee, 'layout', request, 75000);
+            if (result.status === 'timeout') throw new Error('No sensor confirmation. The sensor may be partially updated; re-save the complete layout to retry.');
+            if (result.status !== 'verified') throw new Error(result.state.layout_error || 'Sensor layout verification failed. Re-save the complete layout to retry.');
+            if (result.state.native_verification === 'acknowledged') log('info', 'Zone table too large to read back over this coordinator; every zone command was confirmed by the sensor instead');
             await z2mRequest('device/options', {id: ieee, options: {fp400_layout: JSON.stringify(layout), fp400_zone_mode: 'native', fp400_subscribe: false}});
             persisted.layouts[ieee] = layout;
             workflow.update(ieee, {zoneMode: 'native', sensorSavedAt: Date.now()});
@@ -546,6 +527,23 @@ const actions = {
         });
     },
 };
+
+/** Wait for the converter's result for one correlated request (`<prefix>_request` / `_status` / `_error`). */
+function sensorResult(ieee, prefix, request, timeoutMs) {
+    return new Promise((resolve) => {
+        const deadline = Date.now() + timeoutMs;
+        const timer = setInterval(() => {
+            const state = S.states.get(ieee);
+            if (state?.[`${prefix}_request`] === request) {
+                clearInterval(timer);
+                resolve({status: state[`${prefix}_status`] === 'verified' ? 'verified' : 'failed', state});
+            } else if (Date.now() >= deadline) {
+                clearInterval(timer);
+                resolve({status: 'timeout', state});
+            }
+        }, 100);
+    });
+}
 
 function requireDevice(ieee) {
     const device = S.devices.find((d) => d.ieee_address === ieee);
