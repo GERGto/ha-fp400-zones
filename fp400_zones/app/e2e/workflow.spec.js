@@ -106,3 +106,34 @@ test('native occupancy highlights, obstacle editing and signal quality', async (
     await expect(page.getByRole('button', {name: 'Use software zones'})).toHaveCount(0);
     await expect(page.locator('body')).toHaveJSProperty('scrollWidth', await page.evaluate(() => innerWidth));
 });
+
+test('rectangle tool draws and erase rectangle clears part of an area', async ({page}) => {
+    const errors = []; page.on('pageerror', (e) => errors.push(e.message));
+    const m = await mock(page);
+    const bits = (hex) => [...hex].reduce((n, c) => n + [...parseInt(c, 16).toString(2)].filter((b) => b === '1').length, 0);
+    await page.getByRole('link', {name: /Living room/}).click();
+    await page.getByRole('button', {name: /Create your first zone/}).click();
+    await page.locator('#map').scrollIntoViewIfNeeded();
+    const box = await page.locator('#map').boundingBox();
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    const drag = async (from, to) => {
+        await page.mouse.move(cx + from[0], cy + from[1]); await page.mouse.down();
+        await page.mouse.move(cx + to[0], cy + to[1], {steps: 4}); await page.mouse.up();
+    };
+    const cells = async () => (await page.evaluate(() => JSON.parse(localStorage.getItem('fp400.v2.draft.sensor-a')))).layout.zones[0].cells;
+    await page.getByRole('button', {name: 'Rectangle', exact: true}).click();
+    await drag([-60, -60], [60, 60]);
+    const drawn = bits(await cells());
+    expect(drawn).toBeGreaterThanOrEqual(9);
+    await page.getByRole('button', {name: 'Erase rectangle', exact: true}).click();
+    await expect(page.getByRole('button', {name: 'Erase rectangle', exact: true})).toHaveAttribute('aria-pressed', 'true');
+    await drag([-60, -60], [0, 60]);
+    const remaining = bits(await cells());
+    expect(remaining).toBeGreaterThan(0);
+    expect(remaining).toBeLessThan(drawn);
+    await page.getByRole('button', {name: 'Undo', exact: true}).click();
+    expect(bits(await cells())).toBe(drawn);
+    await page.getByRole('button', {name: 'Save changes'}).click();
+    await expect.poll(() => m.requests.find((r) => r.op === 'saveLayout')?.layout.zones[0].cells).toBe(await cells());
+    expect(errors).toEqual([]);
+});

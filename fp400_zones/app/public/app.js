@@ -9,6 +9,7 @@ let snap = null, ws, serial = 0, current = '', view = 'dashboard', step = 0, act
 let areaTab = 'zones';
 let layout = normalize(null), dirty = false, undo = [], trace = [], pass = 1, traceStart = 0, toastTimer, lastRenderKey = '';
 let mounting = {mode: 'wall', side: 'wall', height: 2000}, painting = null, transform = null;
+const TOOLS = {paint: 'Draw', rect: 'Rectangle', erase: 'Erase', rectErase: 'Erase rectangle'};
 const pending = new Map();
 const states = new Map();
 const device = () => snap?.devices.find((d) => d.ieee === current);
@@ -167,7 +168,7 @@ function wizard() {
 }
 function editor() {
     const d = device(); if (!d) return '';
-    return `<a class="back" href="#/">← All sensors</a><div class="pagehead"><div><div class="eyebrow">Room overview</div><h1>${esc(displayName(d))}</h1><p id="roomPresence">Waiting for sensor data</p></div><div class="actions">${button('rename', 'Rename')}${button('setupAgain', 'Run setup')}</div></div>${!d.ready ? prerequisites() : ''}<div class="editor"><section class="card map-card"><div class="map-header"><strong>Room plan</strong><span class="badge" id="liveBadge">Live view</span></div><div class="tools">${['paint', 'rect', 'erase'].map((t) => `<button data-tool="${t}" aria-pressed="${tool === t}">${{paint: 'Draw', rect: 'Rectangle', erase: 'Erase'}[t]}</button>`).join('')}${button('undo', 'Undo')}${button('fit', 'Fit room')}<select id="activeZone" aria-label="Selected drawing area"><option value="">Choose an area</option>${layout.zones.map((z) => `<option value="${z.id}">${esc(z.name)}</option>`).join('')}${Object.entries(REGIONS).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></div><div class="map-wrap"><canvas id="map" aria-label="Draw zones and obstacles on the room grid"></canvas></div><div class="map-legend"><span id="mapScale">50 cm cells</span><label><input id="mirror" type="checkbox" ${d.profile?.mirror ? 'checked' : ''}> Mirror view</label></div><p class="note" id="drawHint" style="margin-top:12px">${active ? 'Drag on the grid to draw the selected area.' : 'Add your first zone or select an obstacle tool to draw.'}</p><div class="savebar">${button('saveLayout', dirty ? 'Save changes' : 'Save layout', true)}${button('export', 'Export')}</div></section><aside class="sidebar"><section class="card area-panel"><div class="area-tabs" role="tablist" aria-label="Room areas"><button role="tab" id="zonesTab" aria-selected="${areaTab === 'zones'}">Zones</button><button role="tab" id="obstaclesTab" aria-selected="${areaTab === 'obstacles'}">Obstacles</button></div><div id="zonePanel" ${areaTab === 'zones' ? '' : 'hidden'}><h2>Zones <small>${layout.zones.length}/8</small></h2><div id="zones">${layout.zones.map((z) => `<div class="zone ${active === z.id ? 'selected' : ''}" data-zone="${z.id}"><div class="zone-head"><span class="swatch" style="background:${COLORS[z.id - 1]}"></span><input data-name="${z.id}" aria-label="Zone ${z.id} name" maxlength="80" value="${esc(z.name)}"><span class="badge" data-occupied="${z.id}">—</span></div><div class="zone-controls"><button data-delete="${z.id}" aria-label="Delete zone ${z.id}">×</button></div></div>`).join('')}</div>${layout.zones.length < 8 ? `<button class="new-zone" id="addZone">＋ ${layout.zones.length ? 'Add zone' : 'Create your first zone'}</button>` : ''}<p class="note">Zones and obstacles are transferred and verified when you save.</p></div><div id="obstaclePanel" ${areaTab === 'obstacles' ? '' : 'hidden'}><h2>Adjust detection</h2><p class="note">Choose a purpose, then draw its area on the room plan.</p><div class="segment">${Object.entries(REGIONS).map(([k, v]) => `<button data-region="${k}" aria-pressed="${active === k}"><strong>${v}</strong><small>${{monitoring: 'Space the sensor should ignore', interference: 'Moving objects such as fans or curtains', entry_exit: 'Doorways and room transitions'}[k]}</small></button>`).join('')}</div>${button('clearArea', 'Clear selected area')}<p class="note" style="margin-top:12px">Use Draw, Rectangle or Erase on the map. Save transfers every area together.</p></div></section><section class="card"><h2>Sensor storage</h2><p>Occupancy is evaluated by the FP400. Live positions are requested only while viewing this room.</p><p class="note">Sensor protocol support is experimental. Saving requires matching readback; test occupancy after saving.</p></section></aside></div>`;
+    return `<a class="back" href="#/">← All sensors</a><div class="pagehead"><div><div class="eyebrow">Room overview</div><h1>${esc(displayName(d))}</h1><p id="roomPresence">Waiting for sensor data</p></div><div class="actions">${button('rename', 'Rename')}${button('setupAgain', 'Run setup')}</div></div>${!d.ready ? prerequisites() : ''}<div class="editor"><section class="card map-card"><div class="map-header"><strong>Room plan</strong><span class="badge" id="liveBadge">Live view</span></div><div class="tools">${Object.entries(TOOLS).map(([t, label]) => `<button data-tool="${t}" aria-pressed="${tool === t}">${label}</button>`).join('')}${button('undo', 'Undo')}${button('fit', 'Fit room')}<select id="activeZone" aria-label="Selected drawing area"><option value="">Choose an area</option>${layout.zones.map((z) => `<option value="${z.id}">${esc(z.name)}</option>`).join('')}${Object.entries(REGIONS).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></div><div class="map-wrap"><canvas id="map" aria-label="Draw zones and obstacles on the room grid"></canvas></div><div class="map-legend"><span id="mapScale">50 cm cells</span><label><input id="mirror" type="checkbox" ${d.profile?.mirror ? 'checked' : ''}> Mirror view</label></div><p class="note" id="drawHint" style="margin-top:12px">${active ? 'Drag on the grid to draw the selected area.' : 'Add your first zone or select an obstacle tool to draw.'}</p><div class="savebar">${button('saveLayout', dirty ? 'Save changes' : 'Save layout', true)}${button('export', 'Export')}</div></section><aside class="sidebar"><section class="card area-panel"><div class="area-tabs" role="tablist" aria-label="Room areas"><button role="tab" id="zonesTab" aria-selected="${areaTab === 'zones'}">Zones</button><button role="tab" id="obstaclesTab" aria-selected="${areaTab === 'obstacles'}">Obstacles</button></div><div id="zonePanel" ${areaTab === 'zones' ? '' : 'hidden'}><h2>Zones <small>${layout.zones.length}/8</small></h2><div id="zones">${layout.zones.map((z) => `<div class="zone ${active === z.id ? 'selected' : ''}" data-zone="${z.id}"><div class="zone-head"><span class="swatch" style="background:${COLORS[z.id - 1]}"></span><input data-name="${z.id}" aria-label="Zone ${z.id} name" maxlength="80" value="${esc(z.name)}"><span class="badge" data-occupied="${z.id}">—</span></div><div class="zone-controls"><button data-delete="${z.id}" aria-label="Delete zone ${z.id}">×</button></div></div>`).join('')}</div>${layout.zones.length < 8 ? `<button class="new-zone" id="addZone">＋ ${layout.zones.length ? 'Add zone' : 'Create your first zone'}</button>` : ''}<p class="note">Zones and obstacles are transferred and verified when you save.</p></div><div id="obstaclePanel" ${areaTab === 'obstacles' ? '' : 'hidden'}><h2>Adjust detection</h2><p class="note">Choose a purpose, then draw its area on the room plan.</p><div class="segment">${Object.entries(REGIONS).map(([k, v]) => `<button data-region="${k}" aria-pressed="${active === k}"><strong>${v}</strong><small>${{monitoring: 'Space the sensor should ignore', interference: 'Moving objects such as fans or curtains', entry_exit: 'Doorways and room transitions'}[k]}</small></button>`).join('')}</div>${button('clearArea', 'Clear selected area')}<p class="note" style="margin-top:12px">Use Draw, Rectangle, Erase or Erase rectangle on the map. Save transfers every area together.</p></div></section><section class="card"><h2>Sensor storage</h2><p>Occupancy is evaluated by the FP400. Live positions are requested only while viewing this room.</p><p class="note">Sensor protocol support is experimental. Saving requires matching readback; test occupancy after saving.</p></section></aside></div>`;
 }
 function settings() {
     const debug = store.get('debug', false);
@@ -266,6 +267,8 @@ function refreshLive() {
 setInterval(refreshLive, 1000);
 
 let fullGrid = false;
+const isRect = () => tool === 'rect' || tool === 'rectErase';
+const isErase = () => tool === 'erase' || tool === 'rectErase';
 function selectedMask() { return typeof active === 'number' ? layout.zones.find((z) => z.id === active)?.cells : layout.regions[active]; }
 function setMask(hex) { if (typeof active === 'number') { const z = layout.zones.find((z) => z.id === active); if (z) z.cells = hex; } else if (active in REGIONS) layout.regions[active] = hex; }
 function draw() {
@@ -307,10 +310,10 @@ function draw() {
         ctx.fillStyle = color('--accent'); ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = color('--card'); ctx.lineWidth = 3; ctx.stroke();
     }
-    if (view === 'editor' && painting && tool === 'rect') {
+    if (view === 'editor' && painting && isRect()) {
         const {rows, cols} = rectSpan(painting.start, painting.last);
         const a = xy((7 - cols[1]) * 50, (rows[1] + 1) * 50), z = xy((8 - cols[0]) * 50, rows[0] * 50);
-        ctx.strokeStyle = color('--accent'); ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+        ctx.strokeStyle = tool === 'rectErase' ? color('--danger') : color('--accent'); ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
         ctx.strokeRect(Math.min(a[0], z[0]), Math.min(a[1], z[1]), Math.abs(z[0] - a[0]), Math.abs(z[1] - a[1])); ctx.setLineDash([]);
     }
     const [sx, sy] = xy(0, 0); if (sy <= height && sy >= 0) { ctx.fillStyle = color('--primary'); ctx.fillRect(sx - 10, sy - 5, 20, 10); }
@@ -328,16 +331,16 @@ function bindCanvas() {
         const y = t.b.minY + (t.height - t.oy - (e.clientY - r.top)) / t.scale;
         return cellAt(x, y);
     };
-    const apply = (bit, commit = true) => { if (bit === null || !selectedMask()) return; setMask(maskSet(selectedMask(), bit, tool !== 'erase')); if (commit) changed(); };
+    const apply = (bit, commit = true) => { if (bit === null || !selectedMask()) return; setMask(maskSet(selectedMask(), bit, !isErase())); if (commit) changed(); };
     cv.onpointerdown = (e) => {
         if (view !== 'editor' || active === null) return;
         const bit = bitFor(e); if (bit === null) return;
         cv.setPointerCapture(e.pointerId); undo.push(structuredClone(layout)); if (undo.length > 40) undo.shift();
-        painting = {start: bit, last: bit}; if (tool !== 'rect') apply(bit);
+        painting = {start: bit, last: bit}; if (!isRect()) apply(bit); else draw();
     };
-    cv.onpointermove = (e) => { if (!painting) return; const bit = bitFor(e); if (bit === null || bit === painting.last) return; painting.last = bit; if (tool !== 'rect') apply(bit); else draw(); };
+    cv.onpointermove = (e) => { if (!painting) return; const bit = bitFor(e); if (bit === null || bit === painting.last) return; painting.last = bit; if (!isRect()) apply(bit); else draw(); };
     cv.onpointerup = () => {
-        if (painting && tool === 'rect') {
+        if (painting && isRect()) {
             const {rows, cols} = rectSpan(painting.start, painting.last);
             for (let row = rows[0]; row <= rows[1]; row++) for (let col = cols[0]; col <= cols[1]; col++) apply(row * 16 + col, false);
             painting = null;

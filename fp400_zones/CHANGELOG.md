@@ -6,6 +6,7 @@
 - Removed the unused raw `set`/`get` WebSocket actions, which allowed arbitrary MQTT payloads to be published to a sensor.
 - Web UI responses send `X-Content-Type-Options`, `Referrer-Policy` and a Content Security Policy.
 - Rectangle tool shows a live outline while dragging and commits the area as a single change instead of one draft write per cell.
+- New **Erase rectangle** tool clears a rectangular part of the selected zone or obstacle area in one drag, with a red live outline.
 - New zones default to a 0-second delay, matching the value written to the sensor on save. Removed unused delay handling.
 
 ## 1.2.5
