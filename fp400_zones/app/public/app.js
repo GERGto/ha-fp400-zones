@@ -88,7 +88,7 @@ function route() {
         const draft = store.get(`draft.${current}`, null);
         layout = normalize(draft?.dirty ? draft.layout : device().layout);
         dirty = !!draft?.dirty; active = layout.zones[0]?.id ?? null; undo = []; trace = []; pass = 1;
-        const s = state(); mounting = {mode: s.install_mode === 'ceiling' ? 'ceiling' : 'wall', side: s.side_install || 'wall', height: s.install_height || 2000};
+        mounting = mountingFromState(state());
     }
     if (current && (parts[2] === 'setup' || (!device().profile?.completedAt && !device().layout?.zones?.length))) {
         view = 'setup';
@@ -99,6 +99,13 @@ function route() {
 window.addEventListener('hashchange', route);
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
+// The sensor can report 'unknown' or 0 after a reset; start the wizard from valid values instead.
+function mountingFromState(s) {
+    const height = Number(s.install_height);
+    return {mode: s.install_mode === 'ceiling' ? 'ceiling' : 'wall',
+        side: ['wall', 'left_corner', 'right_corner'].includes(s.side_install) ? s.side_install : 'wall',
+        height: Number.isFinite(height) && height >= 100 && height <= 5000 ? Math.round(height) : 2000};
+}
 function applyTheme() {
     const mode = snap?.settings?.theme || store.get('theme', 'auto');
     let dark = mode === 'dark';

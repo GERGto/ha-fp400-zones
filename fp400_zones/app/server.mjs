@@ -375,8 +375,9 @@ setInterval(closePairingIfComplete, 5000);
 const actions = {
     async mounting({ieee, mode, side, height}) {
         const d = requireDevice(ieee);
-        if (!['wall', 'ceiling'].includes(mode) || !['wall', 'left_corner', 'right_corner'].includes(side)
-            || !Number.isInteger(height) || height < 100 || height > 5000) throw new Error('Invalid mounting settings');
+        if (!['wall', 'ceiling'].includes(mode)) throw new Error('Invalid mounting type. Choose wall or ceiling.');
+        if (mode === 'wall' && !['wall', 'left_corner', 'right_corner'].includes(side)) throw new Error('Invalid wall position. Choose flat wall, left corner or right corner.');
+        if (!Number.isInteger(height) || height < 100 || height > 5000) throw new Error('Mounting height must be between 0.1 and 5 m.');
         for (const [key, value] of Object.entries({install_mode: mode, ...(mode === 'wall' ? {side_install: side} : {}), install_height: height})) {
             const previous = S.states.get(ieee);
             publish(`${BASE}/${d.friendly_name}/set`, {[key]: value});

@@ -137,3 +137,17 @@ test('rectangle tool draws and erase rectangle clears part of an area', async ({
     await expect.poll(() => m.requests.find((r) => r.op === 'saveLayout')?.layout.zones[0].cells).toBe(await cells());
     expect(errors).toEqual([]);
 });
+
+test('mounting wizard starts from valid values when the sensor reports unknown settings', async ({page}) => {
+    const m = await mock(page);
+    const office = m.snapshot.devices.find((d) => d.ieee === 'sensor-b');
+    office.state = {install_mode: 'unknown', side_install: 'unknown', install_height: 0};
+    m.send(m.snapshot);
+    await page.getByRole('link', {name: /Office/}).click();
+    await page.getByRole('button', {name: /On the ceiling/}).click();
+    await page.getByRole('button', {name: 'Continue', exact: true}).click();
+    await page.locator('#heightNumber').fill('3.5');
+    await page.locator('#heightNumber').dispatchEvent('change');
+    await page.getByRole('button', {name: 'Continue', exact: true}).click();
+    await expect.poll(() => m.requests.find((r) => r.op === 'mounting')).toMatchObject({mode: 'ceiling', side: 'wall', height: 3500});
+});

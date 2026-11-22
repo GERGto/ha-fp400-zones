@@ -7,6 +7,7 @@
 - Web UI responses send `X-Content-Type-Options`, `Referrer-Policy` and a Content Security Policy.
 - Rectangle tool shows a live outline while dragging and commits the area as a single change instead of one draft write per cell.
 - New **Erase rectangle** tool clears a rectangular part of the selected zone or obstacle area in one drag, with a red live outline.
+- Setup wizard no longer fails with "Invalid mounting settings" when the sensor reports `unknown` mounting values or a height of 0; it starts from valid defaults. Mounting errors now name the invalid field, and the wall position is only checked for wall mounting.
 - New zones default to a 0-second delay, matching the value written to the sensor on save. Removed unused delay handling.
 
 ## 1.2.5
