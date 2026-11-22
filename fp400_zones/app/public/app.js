@@ -170,6 +170,19 @@ function pairing() {
 function mountingPicture(mode) {
     return `<svg viewBox="0 0 200 130" aria-hidden="true"><path d="M25 15V110H185" fill="none" stroke="var(--muted)" stroke-width="5"/>${mode === 'ceiling' ? '<path d="M25 15H185" stroke="var(--muted)" stroke-width="5"/><path d="M100 30L45 110H155Z" fill="var(--soft)"/><rect x="85" y="16" width="30" height="15" rx="7" fill="var(--accent)"/>' : '<path d="M40 50L180 20V110Z" fill="var(--soft)"/><rect x="25" y="37" width="18" height="30" rx="7" fill="var(--accent)"/>'}<circle cx="125" cy="78" r="7" fill="var(--muted)"/><path d="M125 87V110" stroke="var(--muted)" stroke-width="6"/></svg>`;
 }
+// The sensor derives floor distances from its slant range and this height, so a wrong value distorts every position.
+const UNUSUAL_CEILING_MM = 3200;
+const unusualHeight = () => mounting.mode === 'ceiling' && mounting.height > UNUSUAL_CEILING_MM;
+/** Floor distance the sensor would report for a person 4 m away if the entered height were 0.3 m too high. */
+function distortedDistance(heightMm, distanceM = 4, errorM = 0.3) {
+    const h = heightMm / 1000;
+    return Math.sqrt(Math.max(0, distanceM ** 2 + h ** 2 - (h + errorM) ** 2));
+}
+function heightHint() {
+    if (mounting.mode !== 'ceiling') return 'Measure the height precisely: the sensor uses it to calculate every distance.';
+    const warning = unusualHeight() ? `<strong class="error">${(mounting.height / 1000).toFixed(2)} m is unusually high for a ceiling. Check for swapped digits.</strong> ` : '';
+    return `${warning}Measure from the floor to the sensor. The sensor uses this height to calculate distances: if it is set 0.3 m too high, a person 4 m away appears at ${distortedDistance(mounting.height).toFixed(1)} m.`;
+}
 function heightPicture() {
     const y = 190 - mounting.height / 5000 * 160;
     return `<svg viewBox="0 0 280 220" aria-label="Sensor height above the floor"><path d="M60 20V195H250" stroke="var(--muted)" stroke-width="5" fill="none"/><rect x="60" y="${y - 12}" width="24" height="24" rx="8" fill="var(--accent)"/><path d="M105 ${y}V195" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4"/><text x="120" y="${(y + 195) / 2}" fill="var(--text)" font-size="18">${(mounting.height / 1000).toFixed(2)} m</text><text x="160" y="215" fill="var(--muted)" font-size="12">Floor</text></svg>`;
@@ -179,7 +192,7 @@ function wizard() {
     const names = ['Mounting', 'Height', 'Empty room', 'Room boundary'];
     let content = '';
     if (step === 0) content = `<h1>Where is your sensor mounted?</h1><p>Choose the actual mounting position for this room.</p><div class="choices">${['wall', 'ceiling'].map((m) => `<button class="choice" data-mount="${m}" aria-pressed="${mounting.mode === m}">${mountingPicture(m)}${m === 'wall' ? 'On a wall' : 'On the ceiling'}</button>`).join('')}</div>${mounting.mode === 'wall' ? `<label class="field">Wall position<select id="side"><option value="wall">Flat wall</option><option value="left_corner">Left corner</option><option value="right_corner">Right corner</option></select></label>` : ''}<label class="field">Room / sensor name<input id="roomName" maxlength="80" value="${esc(displayName(d))}" placeholder="Living room"></label><p class="note">This name is also used in Zigbee2MQTT and its MQTT topic.</p>`;
-    if (step === 1) content = `<h1>Set the mounting height</h1><p>Measure from the floor to the sensor. Drag the slider or enter the height.</p><div class="mount-height"><div id="heightGraphic">${heightPicture()}</div><div><label class="field">Height in metres<input id="heightNumber" type="number" min="0.1" max="5" step="0.05" value="${mounting.height / 1000}"></label><label class="field">Adjust height<input id="heightRange" aria-label="Mounting height" type="range" min="100" max="5000" step="50" value="${mounting.height}"></label></div></div><p class="note">These settings are written to the sensor when you continue.</p>`;
+    if (step === 1) content = `<h1>Set the mounting height</h1><p>Measure from the floor to the sensor. Drag the slider or enter the height.</p><div class="mount-height"><div id="heightGraphic">${heightPicture()}</div><div><label class="field">Height in metres<input id="heightNumber" type="number" min="0.1" max="5" step="0.05" value="${mounting.height / 1000}"></label><label class="field">Adjust height<input id="heightRange" aria-label="Mounting height" type="range" min="100" max="5000" step="50" value="${mounting.height}"></label></div></div><p class="note" id="heightHint" role="status">${heightHint()}</p><p class="note">These settings are written to the sensor when you continue.</p>`;
     if (step === 2) {
         const job = d.learning;
         const busy = job && ['countdown', 'learning'].includes(job.status);
@@ -210,13 +223,14 @@ function bind() {
     if (view === 'setup') {
         document.querySelectorAll('[data-mount]').forEach((b) => { b.onclick = () => { mounting.mode = b.dataset.mount; render(); }; });
         if ($('side')) { $('side').value = mounting.side; $('side').onchange = (e) => { mounting.side = e.target.value; }; }
-        const height = (mm) => { mounting.height = Math.max(100, Math.min(5000, Math.round(mm) || 2000)); $('heightGraphic').innerHTML = heightPicture(); $('heightRange').value = mounting.height; $('heightNumber').value = mounting.height / 1000; };
+        const height = (mm) => { mounting.height = Math.max(100, Math.min(5000, Math.round(mm) || 2000)); $('heightGraphic').innerHTML = heightPicture(); $('heightRange').value = mounting.height; $('heightNumber').value = mounting.height / 1000; $('heightHint').innerHTML = heightHint(); };
         if ($('heightRange')) $('heightRange').oninput = (e) => height(Number(e.target.value));
         if ($('heightNumber')) $('heightNumber').onchange = (e) => height(Number(e.target.value) * 1000);
         action('previous', () => { if (step) { step--; watch(); render(); } else location.hash = '#/'; });
         action('next', async () => {
             if (step === 0) await call('profile', {ieee: current, name: $('roomName').value});
             if (step === 1) {
+                if (unusualHeight() && !confirm(`Is ${(mounting.height / 1000).toFixed(2)} m really the height from the floor to the sensor? Ceilings in homes are rarely higher than ${UNUSUAL_CEILING_MM / 1000} m.`)) return;
                 await call('mounting', {ieee: current, ...mounting});
             }
             step++; if (step === 3) { trace = []; pass = 1; traceStart = 0; }

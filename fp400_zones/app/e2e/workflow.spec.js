@@ -146,10 +146,10 @@ test('mounting wizard starts from valid values when the sensor reports unknown s
     await page.getByRole('link', {name: /Office/}).click();
     await page.getByRole('button', {name: /On the ceiling/}).click();
     await page.getByRole('button', {name: 'Continue', exact: true}).click();
-    await page.locator('#heightNumber').fill('3.5');
+    await page.locator('#heightNumber').fill('2.6');
     await page.locator('#heightNumber').dispatchEvent('change');
     await page.getByRole('button', {name: 'Continue', exact: true}).click();
-    await expect.poll(() => m.requests.find((r) => r.op === 'mounting')).toMatchObject({mode: 'ceiling', side: 'wall', height: 3500});
+    await expect.poll(() => m.requests.find((r) => r.op === 'mounting')).toMatchObject({mode: 'ceiling', side: 'wall', height: 2600});
 });
 
 test('ceiling mounting traces behind the sensor and draws zones on the centred grid', async ({page}) => {
@@ -218,4 +218,28 @@ test('the map uses the last known ceiling mounting before the sensor reports aga
     m.send(m.snapshot);
     await page.getByRole('link', {name: /Living room/}).click();
     await expect(page.locator('#mapScale')).toContainText('ceiling mount');
+});
+
+test('ceiling height hint shows the distance error and asks to confirm unusual heights', async ({page}) => {
+    const m = await mock(page);
+    await page.getByRole('link', {name: /Office/}).click();
+    await page.getByRole('button', {name: /On the ceiling/}).click();
+    await page.getByRole('button', {name: 'Continue', exact: true}).click();
+    const hint = page.locator('#heightHint');
+    await page.locator('#heightNumber').fill('2.59');
+    await page.locator('#heightNumber').dispatchEvent('change');
+    await expect(hint).toContainText('appears at 3.8 m');
+    await expect(hint).not.toContainText('unusually high');
+    await page.locator('#heightNumber').fill('3.5');
+    await page.locator('#heightNumber').dispatchEvent('change');
+    await expect(hint).toContainText('3.50 m is unusually high');
+    const dialogs = [];
+    page.once('dialog', (dialog) => { dialogs.push(dialog.message()); dialog.dismiss(); });
+    await page.getByRole('button', {name: 'Continue', exact: true}).click();
+    await expect.poll(() => dialogs.length).toBe(1);
+    expect(dialogs[0]).toContain('3.50 m');
+    expect(m.requests.some((r) => r.op === 'mounting')).toBe(false);
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', {name: 'Continue', exact: true}).click();
+    await expect.poll(() => m.requests.find((r) => r.op === 'mounting')?.height).toBe(3500);
 });
