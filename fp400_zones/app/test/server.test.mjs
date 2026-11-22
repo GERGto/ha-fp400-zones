@@ -207,6 +207,12 @@ test('snapshot reports the package version, responses carry security headers, ra
     const snapshot = JSON.parse(first);
     assert.equal(snapshot.type, 'snapshot');
     assert.equal(snapshot.version, pkg.version);
+    // Scripts and styles are requested under the current build so cached copies cannot be mixed in.
+    assert.match(snapshot.build, /^[0-9a-f]{12}$/);
+    assert.equal(page.headers.get('cache-control'), 'no-store');
+    const html = await page.text();
+    assert.ok(html.includes(`src="app.js?v=${snapshot.build}"`) && html.includes(`href="style.css?v=${snapshot.build}"`));
+    assert.ok((await (await fetch(`${origin}/app.js?v=${snapshot.build}`)).text()).includes(`from './model.js?v=${snapshot.build}'`));
     for (const [id, op] of [[1, 'set'], [2, 'get']]) {
         const reply = new Promise((resolve) => {
             const onMessage = (data) => {

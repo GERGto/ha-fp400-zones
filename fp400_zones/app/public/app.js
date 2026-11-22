@@ -9,6 +9,9 @@ let snap = null, ws, serial = 0, current = '', view = 'dashboard', step = 0, act
 let areaTab = 'zones';
 let layout = normalize(null), dirty = false, undo = [], trace = [], pass = 1, traceStart = 0, toastTimer, lastRenderKey = '';
 let mounting = {mode: 'wall', side: 'wall', height: 2000}, painting = null, transform = null;
+// Set by the server in the script URL; differs from snapshot.build once the app has been updated.
+const BUILD = new URL(import.meta.url).searchParams.get('v');
+let updateNoticed = false;
 const TOOLS = {paint: 'Draw', rect: 'Rectangle', erase: 'Erase', rectErase: 'Erase rectangle'};
 const pending = new Map();
 const states = new Map();
@@ -52,6 +55,11 @@ function connect() {
             pending.delete(msg.id); clearTimeout(p.timer);
             if (msg.ok) p.resolve(msg.data); else p.reject(new Error(msg.error));
         } else if (msg.type === 'snapshot') {
+            if (BUILD && msg.build && msg.build !== BUILD && !updateNoticed) {
+                updateNoticed = true;
+                if (!dirty) { location.reload(); return; }
+                toast('A new app version is available. Save or export your changes, then reload this page.');
+            }
             const first = !snap; snap = msg;
             for (const d of snap.devices) if (!states.has(d.ieee)) states.set(d.ieee, d.state || {});
             applyTheme();
@@ -186,7 +194,7 @@ function editor() {
 }
 function settings() {
     const debug = store.get('debug', false);
-    return `<div class="settings"><a class="back" href="#/">← All sensors</a><h1>Settings</h1><p>Appearance and diagnostics for all your rooms.</p><section class="card"><h2>Appearance</h2><label class="field">Theme<select id="theme"><option value="auto">Home Assistant / system</option><option value="light">Light</option><option value="dark">Dark</option></select></label><p class="note">Automatic follows Home Assistant when its theme is accessible; otherwise it follows your device.</p></section><section class="card"><h2>Diagnostics</h2><label class="debug-toggle"><input id="debug" type="checkbox" ${debug ? 'checked' : ''}> Show technical details and logs</label><div id="debugPanel" ${debug ? '' : 'hidden'}><p style="margin-top:16px">App ${esc(snap.version)} · Converter ${esc(snap.converterVersion)}</p>${prerequisites()}<div class="actions">${snap.devices.map((d) => `<button data-configure="${esc(d.ieee)}">Reconfigure ${esc(displayName(d))}</button>`).join('')}</div><pre class="logs" id="logs"></pre><p class="note">Detailed operation logs are also available on the Home Assistant app’s Log tab. Remove personal details before sharing diagnostics.</p></div></section><section class="card"><h2>Local drafts</h2><p>Unsaved zone edits are kept separately for each sensor in this browser.</p>${button('clearDrafts', 'Clear browser drafts')}</section></div>`;
+    return `<div class="settings"><a class="back" href="#/">← All sensors</a><h1>Settings</h1><p>Appearance and diagnostics for all your rooms.</p><section class="card"><h2>Appearance</h2><label class="field">Theme<select id="theme"><option value="auto">Home Assistant / system</option><option value="light">Light</option><option value="dark">Dark</option></select></label><p class="note">Automatic follows Home Assistant when its theme is accessible; otherwise it follows your device.</p></section><section class="card"><h2>Diagnostics</h2><label class="debug-toggle"><input id="debug" type="checkbox" ${debug ? 'checked' : ''}> Show technical details and logs</label><div id="debugPanel" ${debug ? '' : 'hidden'}><p style="margin-top:16px">App ${esc(snap.version)}${snap.build ? ` (${esc(snap.build)})` : ''} · Converter ${esc(snap.converterVersion)}</p>${prerequisites()}<div class="actions">${snap.devices.map((d) => `<button data-configure="${esc(d.ieee)}">Reconfigure ${esc(displayName(d))}</button>`).join('')}</div><pre class="logs" id="logs"></pre><p class="note">Detailed operation logs are also available on the Home Assistant app’s Log tab. Remove personal details before sharing diagnostics.</p></div></section><section class="card"><h2>Local drafts</h2><p>Unsaved zone edits are kept separately for each sensor in this browser.</p>${button('clearDrafts', 'Clear browser drafts')}</section></div>`;
 }
 
 function bind() {
