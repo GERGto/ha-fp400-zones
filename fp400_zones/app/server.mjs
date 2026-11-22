@@ -508,7 +508,10 @@ const actions = {
                     const state = S.states.get(ieee);
                     if (state?.layout_request === request) {
                         clearInterval(timer);
-                        if (state.layout_status === 'verified') resolve();
+                        if (state.layout_status === 'verified') {
+                            if (state.native_verification === 'acknowledged') log('info', 'Zone table too large to read back over this coordinator; every zone command was confirmed by the sensor instead');
+                            resolve();
+                        }
                         else reject(new Error(state.layout_error || 'Sensor layout verification failed. Re-save the complete layout to retry.'));
                     } else if (Date.now() >= deadline) {
                         clearInterval(timer);
