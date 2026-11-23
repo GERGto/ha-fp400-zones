@@ -97,7 +97,7 @@ test('saving confirms all masks and correlates sensor failure without claiming s
     const {tzFp400, ATTR} = load();
     const written = new Map();
     let fail = false;
-    const ep = {command: async () => {}, write: async (cluster, attrs) => {
+    const ep = {command: async () => ({status: 0}), write: async (cluster, attrs) => {
         if (fail) throw new Error('Sensor rejected mask');
         if (cluster === 'msOccupancySensing') return;
         for (const [id, item] of Object.entries(attrs)) written.set(Number(id), item.value);
@@ -139,7 +139,7 @@ test('native transfer sends plain IDs and verifies a nonempty wrapped ZCL zone t
     const cells = '80' + '00'.repeat(39);
     const layout = parseLayout({zones: [{id: 2, cells, enabled: true}]});
     const sent = [];
-    const ep = {command: async (cluster, command, data) => sent.push({command, bytes: Buffer.from(Object.values(data))}),
+    const ep = {command: async (cluster, command, data) => { sent.push({command, bytes: Buffer.from(Object.values(data))}); return {status: 0}; },
         read: async () => ({zones: [[{elmType: 0x20, elmVal: 2}, {elmType: 0x30, elmVal: 0}, {elmType: 0x41, elmVal: Buffer.from(cells, 'hex')}, {elmType: 0x10, elmVal: 1}]]})};
     const delayWrites = [];
     const device = {getEndpoint: (id) => ({write: async (cluster, attrs) => delayWrites.push([id, cluster, attrs[3]]), read: async () => ({3: 0})})};
@@ -168,7 +168,7 @@ test('saving verifies global and all eight zone timeouts, including failures', a
     const writes = [];
     const masks = new Map();
     let mode = 'ok';
-    const control = {command: async () => {}, write: async (cluster, attrs) => {
+    const control = {command: async () => ({status: 0}), write: async (cluster, attrs) => {
         if (cluster === 'msOccupancySensing') {
             assert.equal(attrs[3].value, 0); assert.equal(attrs[3].type, 0x21); writes.push(1);
             if (mode === 'global-reject') throw new Error('Rejected');
@@ -197,4 +197,87 @@ test('saving verifies global and all eight zone timeouts, including failures', a
         assert.deepEqual(writes, [1, 3, 4, 5, 6, 7, 8, 9, 10]);
         if (mode !== 'ok') assert.match(result.layout_error, mode.startsWith('global-') ? /Global presence absence confirmation/ : /Zone 4 absence confirmation/);
     }
+});
+
+test('zone commands wait for the sensor response observed on hardware', () => {
+    const {clusterConfig} = load();
+    assert.equal(clusterConfig.commands.appendZonePlain.response, 0x05);
+    assert.equal(clusterConfig.commands.removeZonePlain.response, 0x09);
+    assert.equal(clusterConfig.commandsResponse.appendZoneResponse.ID, 0x05);
+    assert.equal(clusterConfig.commandsResponse.removeZoneResponse.parameters.map((p) => p.name).join(), 'status');
+});
+
+test('a fragmented zone table is verified by command acknowledgments only when every command succeeded', async () => {
+    const {nativeZones, parseLayout} = load();
+    const cells = 'ff'.repeat(20) + '00'.repeat(20);
+    const layout = parseLayout({zones: [{id: 1, cells}, {id: 2, cells: 'ff00'.repeat(20)}]});
+    // Captured on an ember coordinator: only the first 80-byte APS fragment of the read response arrives.
+    const fragmented = async () => { throw new Error('The value of "offset" is out of range. It must be >= 0 and <= 79. Received 110'); };
+    const absence = [];
+    const device = {getEndpoint: (id) => ({write: async () => absence.push(id), read: async () => ({3: 0})})};
+    let statuses = {};
+    const ep = {read: fragmented, command: async (cluster, command, data) => ({status: command === 'appendZonePlain' ? statuses[data.b3] ?? 0 : 0})};
+    const ok = await nativeZones(ep, layout, 'write', device);
+    assert.equal(ok.native_sync, 'verified');
+    assert.equal(ok.native_verification, 'acknowledged');
+    assert.equal(ok.native_errors, null);
+    assert.equal(absence.join(), '1,3,4');
+    statuses = {2: 3};
+    absence.length = 0;
+    const rejected = await nativeZones(ep, layout, 'write', device);
+    assert.equal(rejected.native_sync, 'unreadable');
+    assert.match(rejected.native_errors, /add zone 2: resource_exhausted/);
+    assert.equal(absence.length, 0);
+    ep.command = async () => undefined;
+    const unanswered = await nativeZones(ep, layout, 'write', device);
+    assert.notEqual(unanswered.native_sync, 'verified');
+    assert.match(unanswered.native_errors, /no response from the sensor/);
+});
+
+test('reconfiguration keeps an existing mounting setup and only initialises a blank sensor', async () => {
+    const {fp400Extend} = load();
+    for (const [installHeight, expected] of [[3500, 0], [0, 2]]) {
+        const writes = [];
+        const endpoints = new Map(Array.from({length: 10}, (_, i) => [i + 1, {
+            inputClusters: [0x0406], bind: async () => {}, configureReporting: async () => {},
+            read: async () => ({installMode: 0, sideInstall: 0, installHeight}),
+            write: async (cluster, attrs) => writes.push(attrs),
+        }]));
+        await fp400Extend.configure[0]({getEndpoint: (id) => endpoints.get(id)}, {});
+        assert.equal(writes.length, expected);
+    }
+});
+
+test('mounting writes and reads back each value and answers with the request ID', async () => {
+    const {tzFp400, ATTR} = load();
+    const stored = new Map();
+    let corrupt = null;
+    const writes = [];
+    const ep = {
+        write: async (cluster, attrs) => { for (const [id, item] of Object.entries(attrs)) { writes.push(Number(id)); stored.set(Number(id), item.value); } },
+        read: async (cluster, [name]) => ({[name]: corrupt === name ? 0 : stored.get(ATTR[name])}),
+    };
+    const meta = {device: {getEndpoint: () => ep}};
+    const wall = (await tzFp400.convertSet(null, 'mounting', {request: 'r1', mode: 'wall', side: 'left_corner', height: 2400}, meta)).state;
+    assert.equal(writes.join(), [ATTR.installMode, ATTR.sideInstall, ATTR.installHeight].join());
+    assert.equal(wall.mounting_request, 'r1');
+    assert.equal(wall.mounting_status, 'verified');
+    assert.equal(wall.side_install, 'left_corner');
+    assert.equal(stored.get(ATTR.installMode), 1);
+    writes.length = 0;
+    const ceiling = (await tzFp400.convertSet(null, 'mounting', {request: 'r2', mode: 'ceiling', side: 'unknown', height: 3500}, meta)).state;
+    assert.equal(writes.join(), [ATTR.installMode, ATTR.installHeight].join());
+    assert.equal(ceiling.mounting_status, 'verified');
+    assert.equal(ceiling.install_mode, 'ceiling');
+    assert.equal(ceiling.install_height, 3500);
+    corrupt = 'installHeight';
+    const mismatch = (await tzFp400.convertSet(null, 'mounting', {request: 'r3', mode: 'ceiling', height: 3500}, meta)).state;
+    assert.equal(mismatch.mounting_request, 'r3');
+    assert.equal(mismatch.mounting_status, 'failed');
+    assert.match(mismatch.mounting_error, /installHeight readback mismatch/);
+    corrupt = null;
+    for (const value of [{request: 'r4', mode: 'toString', height: 3500}, {request: 'r5', mode: 'wall', side: 'toString', height: 3500}, {request: 'r6', mode: 'ceiling', height: 50}]) {
+        assert.equal((await tzFp400.convertSet(null, 'mounting', value, meta)).state.mounting_status, 'failed');
+    }
+    await assert.rejects(tzFp400.convertSet(null, 'mounting', {mode: 'ceiling', height: 3500}, meta), /Invalid mounting request/);
 });
