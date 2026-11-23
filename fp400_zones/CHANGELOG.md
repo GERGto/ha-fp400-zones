@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## Unreleased
+
+- New **Erase rectangle** tool clears a rectangular part of the selected zone or obstacle area in one drag, with a red live outline.
+- Rectangle tool shows a live outline while dragging and commits the area as a single change instead of one draft write per cell.
+- The fitted room view always includes every drawn zone and obstacle, so saved areas outside an older or incomplete room outline are no longer cut off. The view toggle is labelled **Show full grid** / **Fit room** according to what it does.
+- After an app update, open pages and the Home Assistant companion app no longer keep running cached old scripts. Script and style URLs carry a content hash, the start page is never cached, and an open page reloads itself when the server reports a newer build (with unsaved zone edits it asks you to save or export first). Settings > Diagnostics shows the build.
+
 ## 1.2.5
 
 - Saving a room now sets both global presence and every transferred zone's absence confirmation time to 0 seconds. The global timeout was observed to delay zone clearing even with per-zone timeouts set to zero.

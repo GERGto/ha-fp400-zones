@@ -10,7 +10,7 @@ Manage your FP400 sensors from one dashboard. Each tile shows presence, zone cou
 4. Adjust mounting height with the slider or numeric input. The illustration follows the selected height. Continue waits for sensor state confirmation.
 5. Remove people and pets. **Start exit countdown** gives you 10 seconds to leave. Empty-room learning then starts. Allow up to two minutes; the display shows elapsed time and progress against that waiting window. This is not a guaranteed sensor duration. Completion requires a fresh sensor result; a timeout is an error, never success.
 6. Enter alone and walk the room boundary twice. Live points form an approximate outer envelope. Confirm the first lap and then both laps manually. You can restart tracing. This estimates the walked area, not actual walls or recesses.
-7. Create your first zone. New rooms have no pre-created zones. Name the zone, select Draw or Rectangle, and drag on the grid. Use Erase or Undo to correct it, then **Save changes**.
+7. Create your first zone. New rooms have no pre-created zones. Name the zone, select Draw or Rectangle, and drag on the grid. Use Erase, Erase rectangle or Undo to correct it, then **Save changes**.
 
 The physical grid stays at 50 cm per cell; the view fits the estimated room. Mirror view changes only the display orientation. **Run setup** repeats the wizard later while preserving zones. Existing installations with saved zones bypass automatic onboarding.
 
@@ -18,7 +18,7 @@ The physical grid stays at 50 cm per cell; the view fits the estimated room. Mir
 
 Use the **Zones** and **Obstacles** tabs in the same room editor. Create up to eight named zones; their numeric IDs remain stable after deletion or renaming. The green outline means the sensor reports that zone occupied. It never comes from calculating a person's position inside the drawn shape.
 
-Under Obstacles, choose Exclusion (ignored space), Interference (moving objects), or Entry / exit (doorways). Draw the area on the same map using Draw, Rectangle and Erase. Clear selected area empties that mask in the draft. The map's area selector lets phone users switch areas without scrolling back to the list.
+Under Obstacles, choose Exclusion (ignored space), Interference (moving objects), or Entry / exit (doorways). Draw the area on the same map using Draw, Rectangle, Erase and Erase rectangle. Clear selected area empties that mask in the draft. The map's area selector lets phone users switch areas without scrolling back to the list.
 
 **Save changes** transfers all zones AND all obstacle masks to the sensor. It replaces the sensor's zone layout and automatically sets global presence and each transferred zone's absence confirmation time to **0 seconds**, including on subsequent saves. The layout, global presence setting and every zone's 0-second setting must read back correctly before reporting success. Do not close the page while saving. If saving fails, the draft remains unsaved; the sensor may be partly changed. Retry by saving the complete layout again. Export downloads the draft JSON.
 
