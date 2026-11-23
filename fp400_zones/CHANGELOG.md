@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## Unreleased
+
+- Diagnostics and the startup log report the actual app version instead of a hard-coded 1.2.2.
+- Removed the unused raw `set`/`get` WebSocket actions, which allowed arbitrary MQTT payloads to be published to a sensor.
+- Web UI responses send `X-Content-Type-Options`, `Referrer-Policy` and a Content Security Policy.
+- New zones default to a 0-second delay, matching the value written to the sensor on save. Removed unused delay handling.
+
 ## 1.2.5
 
 - Saving a room now sets both global presence and every transferred zone's absence confirmation time to 0 seconds. The global timeout was observed to delay zone clearing even with per-zone timeouts set to zero.
