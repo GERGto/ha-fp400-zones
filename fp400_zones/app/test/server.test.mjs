@@ -182,3 +182,18 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
     for (let i = 0; i < 50 && !requests.some((r) => r.topic === 'permit_join' && r.request.time === 0); i++) await delay(20);
     assert.equal(requests.filter((r) => r.topic === 'permit_join' && r.request.time === 0).length, 1);
 });
+
+test('UI assets are requested under the current build so cached copies cannot be mixed in', {timeout: 15000}, async (t) => {
+    const {port} = await start(t);
+    const origin = `http://127.0.0.1:${port}`;
+    const page = await fetch(origin);
+    assert.equal(page.headers.get('cache-control'), 'no-store');
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {origin});
+    t.after(() => ws.terminate());
+    const [first] = await once(ws, 'message');
+    const {build} = JSON.parse(first);
+    assert.match(build, /^[0-9a-f]{12}$/);
+    const html = await page.text();
+    assert.ok(html.includes(`src="app.js?v=${build}"`) && html.includes(`href="style.css?v=${build}"`));
+    assert.ok((await (await fetch(`${origin}/app.js?v=${build}`)).text()).includes(`from './model.js?v=${build}'`));
+});
