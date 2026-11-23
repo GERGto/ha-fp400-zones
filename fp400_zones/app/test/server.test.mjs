@@ -91,6 +91,8 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
     const ieee = '0x0000000000000001';
     let rejectLayout = false, rejectRename = false, push;
     const subscribed = [];
+    const gets = [];
+    const mountings = [];
     const broker = net.createServer((socket) => {
         clients.add(socket);
         socket.on('close', () => clients.delete(socket));
@@ -112,6 +114,17 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
                     publish('bridge/devices', [{ieee_address: ieee, friendly_name: 'Example sensor', model_id: 'lumi.models.4447_8295',
                         interview_completed: true, definition: {model: 'PS-S05D', description: 'FP400-Zonen'}}]);
                 }
+            }
+            if (packet.cmd === 'publish' && packet.topic.endsWith('/get')) gets.push([packet.topic, JSON.parse(packet.payload)]);
+            if (packet.cmd === 'publish' && packet.topic.endsWith('/Example sensor/set') && JSON.parse(packet.payload).mounting) {
+                const mounting = JSON.parse(packet.payload).mounting;
+                // A report whose values already match, but without the request ID, must not confirm the write.
+                publish('Example sensor', {install_mode: mounting.mode, install_height: mounting.height, presence: true});
+                const failed = mounting.height === 4000;
+                setTimeout(() => publish('Example sensor', {install_mode: mounting.mode, install_height: mounting.height,
+                    mounting_request: mounting.request, mounting_status: failed ? 'failed' : 'verified',
+                    mounting_error: failed ? 'installHeight readback mismatch (wrote 4000, read 0)' : null}), 300);
+                mountings.push(mounting);
             }
             if (packet.cmd === 'publish' && packet.topic.endsWith('/Example sensor/set')) {
                 const request = JSON.parse(packet.payload).sensor_layout;
@@ -135,6 +148,15 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
     const {port, data, output} = await start(t, {MQTT_URL: `mqtt://127.0.0.1:${broker.address().port}`, AUTO_SETUP: 'true'});
     for (let i = 0; i < 100 && !output().includes('FP400 configured'); i++) await delay(50);
     assert.deepEqual(requests.map((r) => r.topic), ['converter/save', 'device/configure']);
+    // Device states are not retained: the mounting is requested on subscribe and remembered once reported.
+    assert.deepEqual(gets[0], ['zigbee2mqtt/Example sensor/get', {install_mode: '', side_install: '', install_height: ''}]);
+    push('Example sensor', {install_mode: 'ceiling', install_height: 3500});
+    for (let i = 0; i < 50; i++) {
+        const saved = JSON.parse(await readFile(path.join(data, 'state.json'), 'utf8').catch(() => '{}'));
+        if (saved.profiles?.[ieee]?.installMode === 'ceiling') break;
+        await delay(20);
+    }
+    assert.equal(JSON.parse(await readFile(path.join(data, 'state.json'), 'utf8')).profiles[ieee].installMode, 'ceiling');
     assert.match(requests[0].request.code, /export default/);
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {origin: `http://127.0.0.1:${port}`});
     t.after(() => ws.terminate());
@@ -152,6 +174,13 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
         ws.send(JSON.stringify({id, op, ieee, ...args}));
         return reply;
     };
+    const mounted = await requestAction(10, 'mounting', {mode: 'ceiling', side: 'unknown', height: 3500});
+    assert.equal(mounted.ok, true);
+    assert.equal(mountings[0].side, undefined);
+    assert.match(mountings[0].request, /^[0-9a-f-]{36}$/);
+    const rejected = await requestAction(11, 'mounting', {mode: 'ceiling', height: 4000});
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error, /did not accept the mounting: installHeight readback mismatch/);
     const save = (id, layout) => requestAction(id, 'saveLayout', {layout});
     const layout = {zones: []};
     assert.equal((await save(1, layout)).ok, true);
