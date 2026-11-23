@@ -200,6 +200,9 @@ test('automatic setup and layout saves wait for correlated Zigbee2MQTT replies',
     for (let i = 0; i < 20 && !subscribed.includes('zigbee2mqtt/Office'); i++) await delay(20);
     assert.ok(subscribed.includes('zigbee2mqtt/Office'));
     assert.equal((await requestAction(5, 'profile', {name: '  '})).ok, false);
+    assert.equal((await requestAction(12, 'profile', {rotation: 45})).ok, false);
+    assert.equal((await requestAction(13, 'profile', {rotation: 270})).ok, true);
+    assert.equal((await persisted()).profiles[ieee].rotation, 270);
     assert.equal((await requestAction(6, 'permitJoin')).ok, true);
     const known = {ieee_address: ieee, friendly_name: 'Office', model_id: 'lumi.models.4447_8295', interview_completed: true};
     const added = {ieee_address: '0x0000000000000002', friendly_name: 'New sensor', model_id: 'lumi.models.4447_8295', interview_completed: false};

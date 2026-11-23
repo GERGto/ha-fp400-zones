@@ -1,4 +1,4 @@
-import {COLORS, REGIONS, esc, normalize, addZone, emptyMask, maskHas, maskSet, cellAt, cellOrigin, envelope, bounds, gridMode} from './model.js';
+import {COLORS, REGIONS, esc, normalize, addZone, emptyMask, maskHas, maskSet, cellAt, cellOrigin, envelope, bounds, gridMode, viewTransform, rotationOf} from './model.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -203,7 +203,7 @@ function wizard() {
 }
 function editor() {
     const d = device(); if (!d) return '';
-    return `<a class="back" href="#/">← All sensors</a><div class="pagehead"><div><div class="eyebrow">Room overview</div><h1>${esc(displayName(d))}</h1><p id="roomPresence">Waiting for sensor data</p></div><div class="actions">${button('rename', 'Rename')}${button('setupAgain', 'Run setup')}</div></div>${!d.ready ? prerequisites() : ''}<div class="editor"><section class="card map-card"><div class="map-header"><strong>Room plan</strong><span class="badge" id="liveBadge">Live view</span></div><div class="tools">${Object.entries(TOOLS).map(([t, label]) => `<button data-tool="${t}" aria-pressed="${tool === t}">${label}</button>`).join('')}${button('undo', 'Undo')}${button('fit', fullGrid ? 'Fit room' : 'Show full grid')}<select id="activeZone" aria-label="Selected drawing area"><option value="">Choose an area</option>${layout.zones.map((z) => `<option value="${z.id}">${esc(z.name)}</option>`).join('')}${Object.entries(REGIONS).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></div><div class="map-wrap"><canvas id="map" aria-label="Draw zones and obstacles on the room grid"></canvas></div><div class="map-legend"><span id="mapScale">50 cm cells</span><label><input id="mirror" type="checkbox" ${d.profile?.mirror ? 'checked' : ''}> Mirror view</label></div><p class="note" id="drawHint" style="margin-top:12px">${active ? 'Drag on the grid to draw the selected area.' : 'Add your first zone or select an obstacle tool to draw.'}</p><div class="savebar">${button('saveLayout', dirty ? 'Save changes' : 'Save layout', true)}${button('export', 'Export')}</div></section><aside class="sidebar"><section class="card area-panel"><div class="area-tabs" role="tablist" aria-label="Room areas"><button role="tab" id="zonesTab" aria-selected="${areaTab === 'zones'}">Zones</button><button role="tab" id="obstaclesTab" aria-selected="${areaTab === 'obstacles'}">Obstacles</button></div><div id="zonePanel" ${areaTab === 'zones' ? '' : 'hidden'}><h2>Zones <small>${layout.zones.length}/8</small></h2><div id="zones">${layout.zones.map((z) => `<div class="zone ${active === z.id ? 'selected' : ''}" data-zone="${z.id}"><div class="zone-head"><span class="swatch" style="background:${COLORS[z.id - 1]}"></span><input data-name="${z.id}" aria-label="Zone ${z.id} name" maxlength="80" value="${esc(z.name)}"><span class="badge" data-occupied="${z.id}">—</span></div><div class="zone-controls"><button data-delete="${z.id}" aria-label="Delete zone ${z.id}">×</button></div></div>`).join('')}</div>${layout.zones.length < 8 ? `<button class="new-zone" id="addZone">＋ ${layout.zones.length ? 'Add zone' : 'Create your first zone'}</button>` : ''}<p class="note">Zones and obstacles are transferred and verified when you save.</p></div><div id="obstaclePanel" ${areaTab === 'obstacles' ? '' : 'hidden'}><h2>Adjust detection</h2><p class="note">Choose a purpose, then draw its area on the room plan.</p><div class="segment">${Object.entries(REGIONS).map(([k, v]) => `<button data-region="${k}" aria-pressed="${active === k}"><strong>${v}</strong><small>${{monitoring: 'Space the sensor should ignore', interference: 'Moving objects such as fans or curtains', entry_exit: 'Doorways and room transitions'}[k]}</small></button>`).join('')}</div>${button('clearArea', 'Clear selected area')}<p class="note" style="margin-top:12px">Use Draw, Rectangle, Erase or Erase rectangle on the map. Save transfers every area together.</p></div></section><section class="card"><h2>Sensor storage</h2><p>Occupancy is evaluated by the FP400. Live positions are requested only while viewing this room.</p><p class="note">Sensor protocol support is experimental. Saving requires matching readback; test occupancy after saving.</p></section></aside></div>`;
+    return `<a class="back" href="#/">← All sensors</a><div class="pagehead"><div><div class="eyebrow">Room overview</div><h1>${esc(displayName(d))}</h1><p id="roomPresence">Waiting for sensor data</p></div><div class="actions">${button('rename', 'Rename')}${button('setupAgain', 'Run setup')}</div></div>${!d.ready ? prerequisites() : ''}<div class="editor"><section class="card map-card"><div class="map-header"><strong>Room plan</strong><span class="badge" id="liveBadge">Live view</span></div><div class="tools">${Object.entries(TOOLS).map(([t, label]) => `<button data-tool="${t}" aria-pressed="${tool === t}">${label}</button>`).join('')}${button('undo', 'Undo')}${button('fit', fullGrid ? 'Fit room' : 'Show full grid')}<select id="activeZone" aria-label="Selected drawing area"><option value="">Choose an area</option>${layout.zones.map((z) => `<option value="${z.id}">${esc(z.name)}</option>`).join('')}${Object.entries(REGIONS).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></div><div class="map-wrap"><canvas id="map" aria-label="Draw zones and obstacles on the room grid"></canvas></div><div class="map-legend"><span id="mapScale">50 cm cells</span>${button('rotate', `↻ Rotate view · ${rotationOf(d.profile?.rotation)}°`)}</div><p class="note" id="drawHint" style="margin-top:12px">${active ? 'Drag on the grid to draw the selected area.' : 'Add your first zone or select an obstacle tool to draw.'}</p><div class="savebar">${button('saveLayout', dirty ? 'Save changes' : 'Save layout', true)}${button('export', 'Export')}</div></section><aside class="sidebar"><section class="card area-panel"><div class="area-tabs" role="tablist" aria-label="Room areas"><button role="tab" id="zonesTab" aria-selected="${areaTab === 'zones'}">Zones</button><button role="tab" id="obstaclesTab" aria-selected="${areaTab === 'obstacles'}">Obstacles</button></div><div id="zonePanel" ${areaTab === 'zones' ? '' : 'hidden'}><h2>Zones <small>${layout.zones.length}/8</small></h2><div id="zones">${layout.zones.map((z) => `<div class="zone ${active === z.id ? 'selected' : ''}" data-zone="${z.id}"><div class="zone-head"><span class="swatch" style="background:${COLORS[z.id - 1]}"></span><input data-name="${z.id}" aria-label="Zone ${z.id} name" maxlength="80" value="${esc(z.name)}"><span class="badge" data-occupied="${z.id}">—</span></div><div class="zone-controls"><button data-delete="${z.id}" aria-label="Delete zone ${z.id}">×</button></div></div>`).join('')}</div>${layout.zones.length < 8 ? `<button class="new-zone" id="addZone">＋ ${layout.zones.length ? 'Add zone' : 'Create your first zone'}</button>` : ''}<p class="note">Zones and obstacles are transferred and verified when you save.</p></div><div id="obstaclePanel" ${areaTab === 'obstacles' ? '' : 'hidden'}><h2>Adjust detection</h2><p class="note">Choose a purpose, then draw its area on the room plan.</p><div class="segment">${Object.entries(REGIONS).map(([k, v]) => `<button data-region="${k}" aria-pressed="${active === k}"><strong>${v}</strong><small>${{monitoring: 'Space the sensor should ignore', interference: 'Moving objects such as fans or curtains', entry_exit: 'Doorways and room transitions'}[k]}</small></button>`).join('')}</div>${button('clearArea', 'Clear selected area')}<p class="note" style="margin-top:12px">Use Draw, Rectangle, Erase or Erase rectangle on the map. Save transfers every area together.</p></div></section><section class="card"><h2>Sensor storage</h2><p>Occupancy is evaluated by the FP400. Live positions are requested only while viewing this room.</p><p class="note">Sensor protocol support is experimental. Saving requires matching readback; test occupancy after saving.</p></section></aside></div>`;
 }
 function settings() {
     const debug = store.get('debug', false);
@@ -262,7 +262,12 @@ function bind() {
         action('undo', () => { if (undo.length) { layout = undo.pop(); changed(); render(); } });
         action('clearArea', () => { if (active === null) return; undo.push(structuredClone(layout)); setMask(emptyMask()); changed(); });
         action('fit', () => { fullGrid = !fullGrid; $('fit').textContent = fullGrid ? 'Fit room' : 'Show full grid'; draw(); });
-        $('mirror').onchange = async (e) => { try { await call('profile', {ieee: current, mirror: e.target.checked}); } catch (err) { toast(err.message); } };
+        action('rotate', async () => {
+            const d = device(), rotation = (rotationOf(d.profile?.rotation) + 90) % 360;
+            d.profile = {...d.profile, rotation};
+            $('rotate').textContent = `↻ Rotate view · ${rotation}°`; draw();
+            d.profile = await call('profile', {ieee: current, rotation});
+        });
         action('saveLayout', saveLayout);
         action('export', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(layout, null, 2)], {type: 'application/json'})); a.download = 'fp400-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); });
     }
@@ -317,11 +322,9 @@ function draw() {
     const mode = grid();
     const outline = view === 'setup' ? envelope(trace, mode) : device().profile?.room?.outline;
     const b = bounds(view === 'setup' || fullGrid ? null : [...(outline || []), ...(view === 'editor' ? drawnCorners(mode) : [])], mode);
-    const scale = Math.min((width - 36) / (b.maxX - b.minX), (height - 36) / (b.maxY - b.minY));
-    const ox = (width - (b.maxX - b.minX) * scale) / 2, oy = (height - (b.maxY - b.minY) * scale) / 2;
-    const mirror = !!device().profile?.mirror;
-    const xy = (x, y) => [ox + (mirror ? b.maxX - x : x - b.minX) * scale, height - oy - (y - b.minY) * scale];
-    transform = {xy, b, scale, ox, oy, width, height, mirror};
+    const view2d = viewTransform(b, device().profile?.rotation, width, height);
+    const {xy, scale} = view2d;
+    transform = view2d;
     ctx.strokeStyle = color('--line'); ctx.lineWidth = .7;
     for (let x = b.minX; x <= b.maxX; x += 50) { const a = xy(x, b.minY), z = xy(x, b.maxY); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...z); ctx.stroke(); }
     for (let y = b.minY; y <= b.maxY; y += 50) { ctx.beginPath(); ctx.moveTo(...xy(b.minX, y)); ctx.lineTo(...xy(b.maxX, y)); ctx.stroke(); }
@@ -331,7 +334,7 @@ function draw() {
             const {x, y} = cellOrigin(bit, mode);
             if (x < b.minX || x >= b.maxX || y < b.minY || y >= b.maxY) continue;
             const a = xy(x, y + 50), z = xy(x + 50, y);
-            ctx.globalAlpha = .27; ctx.fillStyle = c; ctx.fillRect(Math.min(a[0], z[0]), a[1], 50 * scale, 50 * scale);
+            ctx.globalAlpha = .27; ctx.fillStyle = c; ctx.fillRect(Math.min(a[0], z[0]), Math.min(a[1], z[1]), 50 * scale, 50 * scale);
             ctx.globalAlpha = 1; if (hatch) { ctx.strokeStyle = c; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...z); ctx.stroke(); }
         }
     };
@@ -354,8 +357,9 @@ function draw() {
         ctx.strokeStyle = tool === 'rectErase' ? color('--danger') : color('--accent'); ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
         ctx.strokeRect(Math.min(a[0], z[0]), Math.min(a[1], z[1]), Math.abs(z[0] - a[0]), Math.abs(z[1] - a[1])); ctx.setLineDash([]);
     }
-    const [sx, sy] = xy(0, 0); if (sy <= height && sy >= 0) { ctx.fillStyle = color('--primary'); ctx.fillRect(sx - 10, sy - 5, 20, 10); }
-    if ($('mapScale')) $('mapScale').textContent = `${((b.maxX - b.minX) / 100).toFixed(1)} × ${((b.maxY - b.minY) / 100).toFixed(1)} m · 50 cm cells${mode === 'ceiling' ? ' · ceiling mount' : ''}`;
+    const [sx, sy] = xy(0, 0), upright = view2d.rotation % 180 === 0;
+    if (sy <= height && sy >= 0) { ctx.fillStyle = color('--primary'); ctx.fillRect(sx - (upright ? 10 : 5), sy - (upright ? 5 : 10), upright ? 20 : 10, upright ? 10 : 20); }
+    if ($('mapScale')) $('mapScale').textContent = `${(view2d.width / 100).toFixed(1)} × ${(view2d.height / 100).toFixed(1)} m · 50 cm cells${mode === 'ceiling' ? ' · ceiling mount' : ''}`;
 }
 // Corners of every drawn zone and obstacle cell, so a fitted view never cuts off saved areas.
 function drawnCorners(mode) {
@@ -376,9 +380,8 @@ function bindCanvas() {
     const cv = $('map');
     const bitFor = (e) => {
         if (!transform) return null;
-        const r = cv.getBoundingClientRect(), t = transform;
-        const x = t.mirror ? t.b.maxX - (e.clientX - r.left - t.ox) / t.scale : t.b.minX + (e.clientX - r.left - t.ox) / t.scale;
-        const y = t.b.minY + (t.height - t.oy - (e.clientY - r.top)) / t.scale;
+        const r = cv.getBoundingClientRect();
+        const [x, y] = transform.world(e.clientX - r.left, e.clientY - r.top);
         return cellAt(x, y, grid());
     };
     const apply = (bit, commit = true) => { if (bit === null || !selectedMask()) return; setMask(maskSet(selectedMask(), bit, !isErase())); if (commit) changed(); };

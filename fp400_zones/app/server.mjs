@@ -413,7 +413,7 @@ const actions = {
         workflow.watch(owner, ieee);
         tickWorkflow();
     },
-    async profile({ieee, name, room, complete, mirror}) {
+    async profile({ieee, name, room, complete, rotation}) {
         const device = requireDevice(ieee);
         const patch = {};
         if (name !== undefined) {
@@ -421,7 +421,10 @@ const actions = {
             patch.name = name.trim();
             if (!patch.name || (/[+#]/.test(patch.name) || [...patch.name].some((c) => c.charCodeAt(0) < 32))) throw new Error('Use a non-empty name without MQTT wildcards or control characters');
         }
-        if (mirror !== undefined) patch.mirror = Boolean(mirror);
+        if (rotation !== undefined) {
+            if (![0, 90, 180, 270].includes(rotation)) throw new Error('Rotation must be 0, 90, 180 or 270 degrees');
+            patch.rotation = rotation;
+        }
         if (room !== undefined) patch.room = validateRoom(room);
         if (complete) {
             if (!workflow.profile(ieee).learnedAt || !patch.room) throw new Error('Complete room learning and boundary tracing first');

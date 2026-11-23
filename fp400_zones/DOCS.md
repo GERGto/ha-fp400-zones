@@ -14,7 +14,7 @@ Manage your FP400 sensors from one dashboard. Each tile shows presence, zone cou
 
 With ceiling mounting the sensor sits in the middle of the map: its grid covers 5 m in each direction along y and 4 m to each side, and positions behind the sensor have negative y. With wall mounting the grid starts at the sensor and extends 10 m into the room. Changing the mounting type changes where existing zones lie, so redraw and save them afterwards.
 
-The physical grid stays at 50 cm per cell; the view fits the estimated room. Mirror view changes only the display orientation. **Run setup** repeats the wizard later while preserving zones. Existing installations with saved zones bypass automatic onboarding.
+The physical grid stays at 50 cm per cell; the view fits the estimated room. **Rotate view** turns the map clockwise in 90° steps so it matches how you picture the room; it changes only the display and is remembered per sensor. Unrotated, the map is a top view with the sensor's forward direction pointing up. **Run setup** repeats the wizard later while preserving zones. Existing installations with saved zones bypass automatic onboarding.
 
 ## Zones and obstacles
 

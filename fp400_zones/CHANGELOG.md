@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Rotate view** replaces **Mirror view**: the room map turns clockwise in 90° steps (remembered per sensor), and drawing, tracing and the sensor marker follow the rotation. The unrotated map is already a true top view for wall and ceiling mounting, so mirroring is no longer offered; a previously saved mirror setting is ignored.
 - Diagnostics and the startup log report the actual app version instead of a hard-coded 1.2.2.
 - Removed the unused raw `set`/`get` WebSocket actions, which allowed arbitrary MQTT payloads to be published to a sensor.
 - Web UI responses send `X-Content-Type-Options`, `Referrer-Policy` and a Content Security Policy.

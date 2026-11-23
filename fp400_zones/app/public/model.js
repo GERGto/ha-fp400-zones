@@ -59,3 +59,27 @@ export function bounds(points, mode = 'wall') {
         minY: Math.max(grid.minY, Math.floor((Math.min(...points.map((p) => p.y)) - 50) / 50) * 50),
         maxY: Math.min(grid.maxY, Math.ceil((Math.max(...points.map((p) => p.y)) + 50) / 50) * 50)};
 }
+
+export const ROTATIONS = [0, 90, 180, 270];
+export const rotationOf = (value) => ROTATIONS.includes(value) ? value : 0;
+/**
+ * Fit world bounds (cm) into a canvas, turned clockwise by `rotation` degrees. Unrotated, +y points up and +x right,
+ * which is a true top view for both wall and ceiling mounting. Returns screen <-> world conversions.
+ */
+export function viewTransform(b, rotation, width, height, margin = 36) {
+    const r = rotationOf(rotation), dx = b.maxX - b.minX, dy = b.maxY - b.minY;
+    const turned = r === 90 || r === 270;
+    const w = turned ? dy : dx, h = turned ? dx : dy;
+    const scale = Math.min((width - margin) / w, (height - margin) / h);
+    const ox = (width - w * scale) / 2, oy = (height - h * scale) / 2;
+    // u to the right and v upwards on screen, in cm from the lower-left corner of the fitted area.
+    const toUV = {0: (x, y) => [x - b.minX, y - b.minY], 90: (x, y) => [y - b.minY, b.maxX - x],
+        180: (x, y) => [b.maxX - x, b.maxY - y], 270: (x, y) => [b.maxY - y, x - b.minX]}[r];
+    const fromUV = {0: (u, v) => [b.minX + u, b.minY + v], 90: (u, v) => [b.maxX - v, b.minY + u],
+        180: (u, v) => [b.maxX - u, b.maxY - v], 270: (u, v) => [b.minX + v, b.maxY - u]}[r];
+    return {
+        rotation: r, scale, ox, oy, width: w, height: h,
+        xy: (x, y) => { const [u, v] = toUV(x, y); return [ox + u * scale, height - oy - v * scale]; },
+        world: (px, py) => fromUV((px - ox) / scale, (height - oy - py) / scale),
+    };
+}

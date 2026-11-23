@@ -258,3 +258,31 @@ test('the fitted ceiling view always includes drawn zones behind the sensor', as
     await page.getByRole('button', {name: 'Show full grid'}).click();
     await expect(page.locator('#mapScale')).toContainText('8.0 × 10.0 m');
 });
+
+test('the room view rotates in 90 degree steps and drawing follows the rotation', async ({page}) => {
+    const m = await mock(page);
+    await page.getByRole('link', {name: /Living room/}).click();
+    await page.getByRole('button', {name: /Create your first zone/}).click();
+    await page.getByRole('button', {name: 'Show full grid'}).click();
+    const rotate = page.getByRole('button', {name: /Rotate view/});
+    await expect(rotate).toHaveText('↻ Rotate view · 0°');
+    await rotate.click();
+    await expect(rotate).toHaveText('↻ Rotate view · 90°');
+    await expect.poll(() => m.requests.filter((r) => r.op === 'profile').at(-1)?.rotation).toBe(90);
+    // Turned a quarter, the 8 m wide wall grid is now 10 m wide on screen.
+    await expect(page.locator('#mapScale')).toContainText('10.0 × 8.0 m');
+    await page.locator('#map').scrollIntoViewIfNeeded();
+    const box = await page.locator('#map').boundingBox();
+    await page.getByRole('button', {name: 'Rectangle', exact: true}).click();
+    // Right edge of the turned view = far end of the wall grid (high rows).
+    await page.mouse.move(box.x + box.width * 0.88, box.y + box.height * 0.45); await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.55, {steps: 3}); await page.mouse.up();
+    const cells = await page.evaluate(() => JSON.parse(localStorage.getItem('fp400.v2.draft.sensor-a')).layout.zones[0].cells);
+    const rows = [...Array(320).keys()].filter((bit) => parseInt(cells.slice((bit >> 3) * 2, (bit >> 3) * 2 + 2), 16) & (128 >> (bit & 7))).map((bit) => bit >> 4);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(Math.min(...rows)).toBeGreaterThanOrEqual(15);
+    for (const degrees of [180, 270, 0]) {
+        await rotate.click();
+        await expect(rotate).toHaveText(`↻ Rotate view · ${degrees}°`);
+    }
+});
