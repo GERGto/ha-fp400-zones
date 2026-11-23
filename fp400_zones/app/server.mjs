@@ -33,6 +33,7 @@ const OUR_MODEL = 'PS-S05D';
 const CONVERTER_NAME = 'aqara-fp400-zones.mjs';
 const CONVERTER_CODE = fs.readFileSync(path.join(HERE, 'converter', CONVERTER_NAME), 'utf8');
 const CONVERTER_VERSION = /CONVERTER_VERSION = '([^']+)'/.exec(CONVERTER_CODE)?.[1] ?? 'dev';
+const APP_VERSION = readJson(path.join(HERE, 'package.json'))?.version ?? 'dev';
 const RETRY_MS = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -57,7 +58,7 @@ function persist() {
         fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify(persisted, null, 1));
         fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
     } catch (err) {
-        log('warn', `Could not ${STATE_FILE} write: ${err.message}`);
+        log('warn', `Could not write ${STATE_FILE}: ${err.message}`);
     }
 }
 
@@ -146,18 +147,20 @@ function setupSteps() {
 }
 
 function snapshot() {
+    const steps = setupSteps();
     return {
         type: 'snapshot',
         addon: ADDON,
         baseTopic: BASE,
         converterVersion: CONVERTER_VERSION,
         autoSetup: AUTO_SETUP,
-        version: '1.2.2',
+        version: APP_VERSION,
+        build: BUILD,
         settings: persisted.settings,
         connections: {mqtt: S.mqtt.status, z2m: S.bridge.state},
         permitJoinUntil: S.permitJoinUntil,
-        steps: setupSteps(),
-        ready: setupSteps().every((s) => s.status === 'ok' || s.status === 'wait' && s.id.startsWith('dev:')),
+        steps,
+        ready: steps.every((s) => s.status === 'ok' || s.status === 'wait' && s.id.startsWith('dev:')),
         devices: S.devices.map((d) => ({
             ieee: d.ieee_address,
             name: d.friendly_name,
@@ -224,7 +227,7 @@ async function connectMqtt() {
         S.mqtt = {status: 'connected', error: null, url: 'MQTT'};
         log('info', 'MQTT connected');
         client.subscribe([`${BASE}/bridge/state`, `${BASE}/bridge/info`, `${BASE}/bridge/devices`, `${BASE}/bridge/converters`, `${BASE}/bridge/response/#`]);
-        for (const d of S.devices) client.subscribe(`${BASE}/${d.friendly_name}`);
+        for (const d of S.devices) { client.subscribe(`${BASE}/${d.friendly_name}`); requestMounting(d); }
     });
     client.on('error', (err) => {
         S.mqtt.status = 'error';
@@ -298,7 +301,11 @@ function onMessage(topic, buf) {
         }
         const names = new Set(S.devices.map((d) => d.friendly_name));
         for (const name of devicesSubscribed) if (!names.has(name)) client.unsubscribe(`${BASE}/${name}`);
-        for (const name of names) if (!devicesSubscribed.has(name)) client.subscribe(`${BASE}/${name}`);
+        for (const d of S.devices) {
+            if (devicesSubscribed.has(d.friendly_name)) continue;
+            client.subscribe(`${BASE}/${d.friendly_name}`);
+            requestMounting(d);
+        }
         devicesSubscribed = names;
         closePairingIfComplete();
         return changed();
@@ -316,6 +323,10 @@ function onMessage(topic, buf) {
     const device = S.devices.find((d) => topic === `${BASE}/${d.friendly_name}`);
     if (device && msg && typeof msg === 'object') {
         S.states.set(device.ieee_address, msg);
+        // Device states are not retained on the broker; remember the mounting so the map is right after a restart.
+        if (['wall', 'ceiling'].includes(msg.install_mode) && workflow.profile(device.ieee_address).installMode !== msg.install_mode) {
+            workflow.update(device.ieee_address, {installMode: msg.install_mode});
+        }
         workflow.observe(device.ieee_address, msg);
         scheduleBroadcast();
         if (Array.isArray(msg.targets) && msg.targets.length) {
@@ -328,6 +339,14 @@ function onMessage(topic, buf) {
         }
         broadcast({type: 'state', ieee: device.ieee_address, state: msg});
     }
+}
+
+/** Ask the sensor for its mounting so the room map uses the right grid without waiting for a report. */
+function requestMounting(d) {
+    if (!deviceUsesOurDefinition(d)) return;
+    try {
+        publish(`${BASE}/${d.friendly_name}/get`, {install_mode: '', side_install: '', install_height: ''});
+    } catch { /* MQTT unavailable; the next connect retries. */ }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -373,20 +392,15 @@ setInterval(closePairingIfComplete, 5000);
 const actions = {
     async mounting({ieee, mode, side, height}) {
         const d = requireDevice(ieee);
-        if (!['wall', 'ceiling'].includes(mode) || !['wall', 'left_corner', 'right_corner'].includes(side)
-            || !Number.isInteger(height) || height < 100 || height > 5000) throw new Error('Invalid mounting settings');
-        for (const [key, value] of Object.entries({install_mode: mode, ...(mode === 'wall' ? {side_install: side} : {}), install_height: height})) {
-            const previous = S.states.get(ieee);
-            publish(`${BASE}/${d.friendly_name}/set`, {[key]: value});
-            await new Promise((resolve, reject) => {
-                const deadline = Date.now() + 25000;
-                const timer = setInterval(() => {
-                    const state = S.states.get(ieee);
-                    if (state !== previous && state?.[key] === value) { clearInterval(timer); resolve(); }
-                    else if (Date.now() >= deadline) { clearInterval(timer); reject(new Error(`Sensor did not confirm ${key}. Check Zigbee2MQTT logs.`)); }
-                }, 200);
-            });
-        }
+        if (!['wall', 'ceiling'].includes(mode)) throw new Error('Invalid mounting type. Choose wall or ceiling.');
+        if (mode === 'wall' && !['wall', 'left_corner', 'right_corner'].includes(side)) throw new Error('Invalid wall position. Choose flat wall, left corner or right corner.');
+        if (!Number.isInteger(height) || height < 100 || height > 5000) throw new Error('Mounting height must be between 0.1 and 5 m.');
+        if (!deviceUsesOurDefinition(d) || ourConverter()?.code !== CONVERTER_CODE) throw new Error('Wait for the current converter to finish installing before setting the mounting');
+        const request = crypto.randomUUID();
+        publish(`${BASE}/${d.friendly_name}/set`, {mounting: {request, mode, ...(mode === 'wall' ? {side} : {}), height}});
+        const result = await sensorResult(ieee, 'mounting', request, 30000);
+        if (result.status === 'timeout') throw new Error('The sensor did not confirm the mounting. Check Zigbee2MQTT logs and retry.');
+        if (result.status !== 'verified') throw new Error(`The sensor did not accept the mounting: ${result.state.mounting_error || 'unknown error'}`);
     },
     async settings({theme}) {
         if (!['auto', 'light', 'dark'].includes(theme)) throw new Error('Invalid theme');
@@ -397,7 +411,7 @@ const actions = {
     async watch({ieee}, owner) {
         if (ieee) requireDevice(ieee);
         workflow.watch(owner, ieee);
-        workflow.tick(S.devices.filter(deviceUsesOurDefinition).map((d) => d.ieee_address), (id) => layoutFor(id).layout);
+        tickWorkflow();
     },
     async profile({ieee, name, room, complete, mirror}) {
         const device = requireDevice(ieee);
@@ -499,20 +513,10 @@ const actions = {
             const request = crypto.randomUUID();
             log('info', 'Writing zones and obstacle masks to sensor; waiting for readback');
             publish(BASE + '/' + d.friendly_name + '/set', {sensor_layout: {request, layout}});
-            await new Promise((resolve, reject) => {
-                const deadline = Date.now() + 75000;
-                const timer = setInterval(() => {
-                    const state = S.states.get(ieee);
-                    if (state?.layout_request === request) {
-                        clearInterval(timer);
-                        if (state.layout_status === 'verified') resolve();
-                        else reject(new Error(state.layout_error || 'Sensor layout verification failed. Re-save the complete layout to retry.'));
-                    } else if (Date.now() >= deadline) {
-                        clearInterval(timer);
-                        reject(new Error('No sensor confirmation. The sensor may be partially updated; re-save the complete layout to retry.'));
-                    }
-                }, 100);
-            });
+            const result = await sensorResult(ieee, 'layout', request, 75000);
+            if (result.status === 'timeout') throw new Error('No sensor confirmation. The sensor may be partially updated; re-save the complete layout to retry.');
+            if (result.status !== 'verified') throw new Error(result.state.layout_error || 'Sensor layout verification failed. Re-save the complete layout to retry.');
+            if (result.state.native_verification === 'acknowledged') log('info', 'Zone table too large to read back over this coordinator; every zone command was confirmed by the sensor instead');
             await z2mRequest('device/options', {id: ieee, options: {fp400_layout: JSON.stringify(layout), fp400_zone_mode: 'native', fp400_subscribe: false}});
             persisted.layouts[ieee] = layout;
             workflow.update(ieee, {zoneMode: 'native', sensorSavedAt: Date.now()});
@@ -522,17 +526,24 @@ const actions = {
             scheduleBroadcast();
         });
     },
-    async set({ieee, payload}) {
-        const d = S.devices.find((x) => x.ieee_address === ieee);
-        if (!d) throw new Error('Device not found');
-        publish(`${BASE}/${d.friendly_name}/set`, payload);
-    },
-    async get({ieee, payload}) {
-        const d = S.devices.find((x) => x.ieee_address === ieee);
-        if (!d) throw new Error('Device not found');
-        publish(`${BASE}/${d.friendly_name}/get`, payload);
-    },
 };
+
+/** Wait for the converter's result for one correlated request (`<prefix>_request` / `_status` / `_error`). */
+function sensorResult(ieee, prefix, request, timeoutMs) {
+    return new Promise((resolve) => {
+        const deadline = Date.now() + timeoutMs;
+        const timer = setInterval(() => {
+            const state = S.states.get(ieee);
+            if (state?.[`${prefix}_request`] === request) {
+                clearInterval(timer);
+                resolve({status: state[`${prefix}_status`] === 'verified' ? 'verified' : 'failed', state});
+            } else if (Date.now() >= deadline) {
+                clearInterval(timer);
+                resolve({status: 'timeout', state});
+            }
+        }, 100);
+    });
+}
 
 function requireDevice(ieee) {
     const device = S.devices.find((d) => d.ieee_address === ieee);
@@ -545,7 +556,10 @@ const workflow = new Workflow({profiles: persisted.profiles, save: persist, chan
         if (!deviceUsesOurDefinition(d)) throw new Error('FP400 converter is not active');
         publish(`${BASE}/${d.friendly_name}/set`, payload);
     }});
-setInterval(() => workflow.tick(S.devices.filter(deviceUsesOurDefinition).map((d) => d.ieee_address), (id) => layoutFor(id).layout), 1000);
+function tickWorkflow() {
+    workflow.tick(S.devices.filter(deviceUsesOurDefinition).map((d) => d.ieee_address));
+}
+setInterval(tickWorkflow, 1000);
 
 // Automatic setup: install / update the converter and configure the sensor without user interaction.
 let autoTimer = null;
@@ -606,6 +620,24 @@ function allowed(req) {
     return ip === '172.30.32.2';
 }
 
+// The ingress panel embeds this page in Home Assistant, so framing is intentionally not restricted here.
+const SECURITY_HEADERS = {
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; form-action 'none'",
+};
+
+// Asset URLs carry a content hash so a browser (or the ingress iframe after a reload of Home Assistant only)
+// can never combine a cached old script with a newer server.
+const PUBLIC = path.join(HERE, 'public');
+const BUILD = crypto.createHash('sha256')
+    .update(['index.html', 'app.js', 'model.js', 'style.css'].map((f) => fs.readFileSync(path.join(PUBLIC, f), 'utf8')).join('\0'))
+    .digest('hex').slice(0, 12);
+const versioned = {
+    'index.html': (text) => text.replace('src="app.js"', `src="app.js?v=${BUILD}"`).replace('href="style.css"', `href="style.css?v=${BUILD}"`),
+    'app.js': (text) => text.replace("from './model.js'", `from './model.js?v=${BUILD}'`),
+};
+
 const STATIC = {
     '/': ['index.html', 'text/html; charset=utf-8'],
     '/index.html': ['index.html', 'text/html; charset=utf-8'],
@@ -616,6 +648,7 @@ const STATIC = {
 };
 
 const server = http.createServer((req, res) => {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     if (!allowed(req)) {
         res.writeHead(403).end('Forbidden');
         return;
@@ -635,13 +668,14 @@ const server = http.createServer((req, res) => {
         res.writeHead(404).end('Not found');
         return;
     }
-    const file = path.join(HERE, 'public', entry[0]);
+    const file = path.join(PUBLIC, entry[0]);
     fs.readFile(file, (err, data) => {
         if (err) {
             res.writeHead(404).end('Not found');
             return;
         }
-        res.writeHead(200, {'content-type': entry[1], 'cache-control': 'no-cache'}).end(data);
+        const body = versioned[entry[0]] ? versioned[entry[0]](data.toString('utf8')) : data;
+        res.writeHead(200, {'content-type': entry[1], 'cache-control': entry[0] === 'index.html' ? 'no-store' : 'no-cache'}).end(body);
     });
 });
 
@@ -690,7 +724,7 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-    log('info', `FP400 Zones 1.2.2 (converter ${CONVERTER_VERSION}) listening on port ${server.address().port} (${ADDON ? 'Home Assistant app' : 'Standalone'})`);
+    log('info', `FP400 Zones ${APP_VERSION} (converter ${CONVERTER_VERSION}) listening on port ${server.address().port} (${ADDON ? 'Home Assistant app' : 'Standalone'})`);
     connectMqtt();
 });
 

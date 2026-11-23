@@ -1,5 +1,23 @@
 ﻿# Changelog
 
+## Unreleased
+
+- Diagnostics and the startup log report the actual app version instead of a hard-coded 1.2.2.
+- Removed the unused raw `set`/`get` WebSocket actions, which allowed arbitrary MQTT payloads to be published to a sensor.
+- Web UI responses send `X-Content-Type-Options`, `Referrer-Policy` and a Content Security Policy.
+- Rectangle tool shows a live outline while dragging and commits the area as a single change instead of one draft write per cell.
+- New **Erase rectangle** tool clears a rectangular part of the selected zone or obstacle area in one drag, with a red live outline.
+- **Saving two or more zones no longer fails.** With two or more zones the FP400 sends its zone table APS-fragmented, and Zigbee2MQTT's ember adapter only receives the first 80-byte fragment, so the readback always failed with "offset is out of range" although the zones were stored and reported occupancy. Every zone command now waits for the sensor's own response (status byte, 0 = success). When the table cannot be read, a save counts as verified only if every remove and add command was confirmed; when it can be read (0 or 1 zone, or adapters that reassemble fragments), it is still compared exactly. Converter version 1.3.5.
+- Device reconfiguration no longer resets an existing mounting setup. A ceiling-mounted sensor reported mounting mode 0 during reconfiguration, and the converter then wrote wall mounting, which also cleared the height. Default mounting is now only written to a sensor without a stored mounting height.
+- After an app update, open pages and the Home Assistant companion app no longer keep running cached old scripts. Script and style URLs carry a content hash, the start page is never cached, and an open page reloads itself when the server reports a newer build (with unsaved zone edits it asks you to save or export first). Settings > Diagnostics shows the build.
+- The room map no longer falls back to the wall grid after an app restart. Zigbee2MQTT does not retain device states on the broker, so until the sensor reported again the app did not know it was ceiling-mounted and drew the sensor at the edge. The app now asks each sensor for its mounting when it subscribes and remembers the last reported mounting type.
+- The fitted room view always includes every drawn zone and obstacle, so saved areas outside an older or incomplete room outline are no longer cut off. The view toggle is labelled **Show full grid** / **Fit room** according to what it does.
+- **Ceiling mounting:** the room map, boundary tracing and zone drawing now use the sensor's centred ceiling grid (y from -5 to +5 m, sensor in the middle) instead of the wall grid (y from 0 to 10 m). Before, every position behind the sensor was discarded and zones were drawn in the wrong rows. The mapping was verified on a ceiling-mounted FP400 with test zones on both sides of the sensor. Ceiling rooms traced or drawn with an older version should be traced and drawn again.
+- The height step explains that the sensor derives every distance from the mounting height and shows, for the entered value, where a person 4 m away would appear if the height were 0.3 m too high. Ceiling heights above 3.2 m are flagged as unusual (for example swapped digits) and must be confirmed. On the test device a 3.5 m setting on a 2.59 m ceiling made a 4 m distance read as about 2.5 m.
+- **Mounting confirmation:** the wizard used to accept any newer sensor report whose value already matched, so a failed write could pass unnoticed when the value was set before. Mounting type, wall position and height are now sent as one request; the converter writes and reads back each value and answers with that request's ID, and only this answer counts. A rejected or mismatched value is shown with the sensor's error.
+- Setup wizard no longer fails with "Invalid mounting settings" when the sensor reports `unknown` mounting values or a height of 0; it starts from valid defaults. Mounting errors now name the invalid field, and the wall position is only checked for wall mounting.
+- New zones default to a 0-second delay, matching the value written to the sensor on save. Removed unused delay handling.
+
 ## 1.2.5
 
 - Saving a room now sets both global presence and every transferred zone's absence confirmation time to 0 seconds. The global timeout was observed to delay zone clearing even with per-zone timeouts set to zero.

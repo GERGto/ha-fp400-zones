@@ -1,4 +1,4 @@
-import {COLORS, REGIONS, esc, normalize, addZone, emptyMask, maskHas, maskSet, cellAt, envelope, bounds} from './model.js';
+import {COLORS, REGIONS, esc, normalize, addZone, emptyMask, maskHas, maskSet, cellAt, cellOrigin, envelope, bounds, gridMode} from './model.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -9,11 +9,22 @@ let snap = null, ws, serial = 0, current = '', view = 'dashboard', step = 0, act
 let areaTab = 'zones';
 let layout = normalize(null), dirty = false, undo = [], trace = [], pass = 1, traceStart = 0, toastTimer, lastRenderKey = '';
 let mounting = {mode: 'wall', side: 'wall', height: 2000}, painting = null, transform = null;
+// Set by the server in the script URL; differs from snapshot.build once the app has been updated.
+const BUILD = new URL(import.meta.url).searchParams.get('v');
+let updateNoticed = false;
+const TOOLS = {paint: 'Draw', rect: 'Rectangle', erase: 'Erase', rectErase: 'Erase rectangle'};
 const pending = new Map();
 const states = new Map();
 const device = () => snap?.devices.find((d) => d.ieee === current);
 const state = () => states.get(current) || device()?.state || {};
 const displayName = (d) => d.profile?.name || d.name;
+// The sensor's grid follows its reported mounting, then the last mounting the app saw (device states are not
+// retained after a restart), then the wizard choice.
+const grid = () => {
+    const known = (m) => m === 'wall' || m === 'ceiling';
+    const m = [state().install_mode, device()?.profile?.installMode].find(known);
+    return gridMode(m ?? mounting.mode);
+};
 const button = (id, label, primary = false, disabled = false) => `<button id="${id}" class="${primary ? 'primary' : ''}" ${disabled ? 'disabled' : ''}>${label}</button>`;
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 6000); }
 function call(op, args = {}) {
@@ -44,6 +55,11 @@ function connect() {
             pending.delete(msg.id); clearTimeout(p.timer);
             if (msg.ok) p.resolve(msg.data); else p.reject(new Error(msg.error));
         } else if (msg.type === 'snapshot') {
+            if (BUILD && msg.build && msg.build !== BUILD && !updateNoticed) {
+                updateNoticed = true;
+                if (!dirty) { location.reload(); return; }
+                toast('A new app version is available. Save or export your changes, then reload this page.');
+            }
             const first = !snap; snap = msg;
             for (const d of snap.devices) if (!states.has(d.ieee)) states.set(d.ieee, d.state || {});
             applyTheme();
@@ -57,7 +73,7 @@ function connect() {
             if (msg.ieee === current && view === 'setup' && step === 3 && (!msg.state.targets_updated_at || Date.now() - msg.state.targets_updated_at < 15000)) {
                 // Ignore duplicate cached coordinates from unrelated sensor reports.
                 for (const p of msg.state.targets || []) {
-                    if (cellAt(p.x, p.y) === null) continue;
+                    if (cellAt(p.x, p.y, grid()) === null) continue;
                     if (!trace.length || Math.hypot(p.x - trace.at(-1).x, p.y - trace.at(-1).y) > 8) trace.push({x: p.x, y: p.y});
                 }
                 if (trace.length > 4000) trace = trace.filter((_, i) => i % 2 === 0);
@@ -87,7 +103,7 @@ function route() {
         const draft = store.get(`draft.${current}`, null);
         layout = normalize(draft?.dirty ? draft.layout : device().layout);
         dirty = !!draft?.dirty; active = layout.zones[0]?.id ?? null; undo = []; trace = []; pass = 1;
-        const s = state(); mounting = {mode: s.install_mode === 'ceiling' ? 'ceiling' : 'wall', side: s.side_install || 'wall', height: s.install_height || 2000};
+        mounting = mountingFromState(state());
     }
     if (current && (parts[2] === 'setup' || (!device().profile?.completedAt && !device().layout?.zones?.length))) {
         view = 'setup';
@@ -98,6 +114,13 @@ function route() {
 window.addEventListener('hashchange', route);
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
+// The sensor can report 'unknown' or 0 after a reset; start the wizard from valid values instead.
+function mountingFromState(s) {
+    const height = Number(s.install_height);
+    return {mode: s.install_mode === 'ceiling' ? 'ceiling' : 'wall',
+        side: ['wall', 'left_corner', 'right_corner'].includes(s.side_install) ? s.side_install : 'wall',
+        height: Number.isFinite(height) && height >= 100 && height <= 5000 ? Math.round(height) : 2000};
+}
 function applyTheme() {
     const mode = snap?.settings?.theme || store.get('theme', 'auto');
     let dark = mode === 'dark';
@@ -147,6 +170,19 @@ function pairing() {
 function mountingPicture(mode) {
     return `<svg viewBox="0 0 200 130" aria-hidden="true"><path d="M25 15V110H185" fill="none" stroke="var(--muted)" stroke-width="5"/>${mode === 'ceiling' ? '<path d="M25 15H185" stroke="var(--muted)" stroke-width="5"/><path d="M100 30L45 110H155Z" fill="var(--soft)"/><rect x="85" y="16" width="30" height="15" rx="7" fill="var(--accent)"/>' : '<path d="M40 50L180 20V110Z" fill="var(--soft)"/><rect x="25" y="37" width="18" height="30" rx="7" fill="var(--accent)"/>'}<circle cx="125" cy="78" r="7" fill="var(--muted)"/><path d="M125 87V110" stroke="var(--muted)" stroke-width="6"/></svg>`;
 }
+// The sensor derives floor distances from its slant range and this height, so a wrong value distorts every position.
+const UNUSUAL_CEILING_MM = 3200;
+const unusualHeight = () => mounting.mode === 'ceiling' && mounting.height > UNUSUAL_CEILING_MM;
+/** Floor distance the sensor would report for a person 4 m away if the entered height were 0.3 m too high. */
+function distortedDistance(heightMm, distanceM = 4, errorM = 0.3) {
+    const h = heightMm / 1000;
+    return Math.sqrt(Math.max(0, distanceM ** 2 + h ** 2 - (h + errorM) ** 2));
+}
+function heightHint() {
+    if (mounting.mode !== 'ceiling') return 'Measure the height precisely: the sensor uses it to calculate every distance.';
+    const warning = unusualHeight() ? `<strong class="error">${(mounting.height / 1000).toFixed(2)} m is unusually high for a ceiling. Check for swapped digits.</strong> ` : '';
+    return `${warning}Measure from the floor to the sensor. The sensor uses this height to calculate distances: if it is set 0.3 m too high, a person 4 m away appears at ${distortedDistance(mounting.height).toFixed(1)} m.`;
+}
 function heightPicture() {
     const y = 190 - mounting.height / 5000 * 160;
     return `<svg viewBox="0 0 280 220" aria-label="Sensor height above the floor"><path d="M60 20V195H250" stroke="var(--muted)" stroke-width="5" fill="none"/><rect x="60" y="${y - 12}" width="24" height="24" rx="8" fill="var(--accent)"/><path d="M105 ${y}V195" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4"/><text x="120" y="${(y + 195) / 2}" fill="var(--text)" font-size="18">${(mounting.height / 1000).toFixed(2)} m</text><text x="160" y="215" fill="var(--muted)" font-size="12">Floor</text></svg>`;
@@ -156,7 +192,7 @@ function wizard() {
     const names = ['Mounting', 'Height', 'Empty room', 'Room boundary'];
     let content = '';
     if (step === 0) content = `<h1>Where is your sensor mounted?</h1><p>Choose the actual mounting position for this room.</p><div class="choices">${['wall', 'ceiling'].map((m) => `<button class="choice" data-mount="${m}" aria-pressed="${mounting.mode === m}">${mountingPicture(m)}${m === 'wall' ? 'On a wall' : 'On the ceiling'}</button>`).join('')}</div>${mounting.mode === 'wall' ? `<label class="field">Wall position<select id="side"><option value="wall">Flat wall</option><option value="left_corner">Left corner</option><option value="right_corner">Right corner</option></select></label>` : ''}<label class="field">Room / sensor name<input id="roomName" maxlength="80" value="${esc(displayName(d))}" placeholder="Living room"></label><p class="note">This name is also used in Zigbee2MQTT and its MQTT topic.</p>`;
-    if (step === 1) content = `<h1>Set the mounting height</h1><p>Measure from the floor to the sensor. Drag the slider or enter the height.</p><div class="mount-height"><div id="heightGraphic">${heightPicture()}</div><div><label class="field">Height in metres<input id="heightNumber" type="number" min="0.1" max="5" step="0.05" value="${mounting.height / 1000}"></label><label class="field">Adjust height<input id="heightRange" aria-label="Mounting height" type="range" min="100" max="5000" step="50" value="${mounting.height}"></label></div></div><p class="note">These settings are written to the sensor when you continue.</p>`;
+    if (step === 1) content = `<h1>Set the mounting height</h1><p>Measure from the floor to the sensor. Drag the slider or enter the height.</p><div class="mount-height"><div id="heightGraphic">${heightPicture()}</div><div><label class="field">Height in metres<input id="heightNumber" type="number" min="0.1" max="5" step="0.05" value="${mounting.height / 1000}"></label><label class="field">Adjust height<input id="heightRange" aria-label="Mounting height" type="range" min="100" max="5000" step="50" value="${mounting.height}"></label></div></div><p class="note" id="heightHint" role="status">${heightHint()}</p><p class="note">These settings are written to the sensor when you continue.</p>`;
     if (step === 2) {
         const job = d.learning;
         const busy = job && ['countdown', 'learning'].includes(job.status);
@@ -167,11 +203,11 @@ function wizard() {
 }
 function editor() {
     const d = device(); if (!d) return '';
-    return `<a class="back" href="#/">← All sensors</a><div class="pagehead"><div><div class="eyebrow">Room overview</div><h1>${esc(displayName(d))}</h1><p id="roomPresence">Waiting for sensor data</p></div><div class="actions">${button('rename', 'Rename')}${button('setupAgain', 'Run setup')}</div></div>${!d.ready ? prerequisites() : ''}<div class="editor"><section class="card map-card"><div class="map-header"><strong>Room plan</strong><span class="badge" id="liveBadge">Live view</span></div><div class="tools">${['paint', 'rect', 'erase'].map((t) => `<button data-tool="${t}" aria-pressed="${tool === t}">${{paint: 'Draw', rect: 'Rectangle', erase: 'Erase'}[t]}</button>`).join('')}${button('undo', 'Undo')}${button('fit', 'Fit room')}<select id="activeZone" aria-label="Selected drawing area"><option value="">Choose an area</option>${layout.zones.map((z) => `<option value="${z.id}">${esc(z.name)}</option>`).join('')}${Object.entries(REGIONS).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></div><div class="map-wrap"><canvas id="map" aria-label="Draw zones and obstacles on the room grid"></canvas></div><div class="map-legend"><span id="mapScale">50 cm cells</span><label><input id="mirror" type="checkbox" ${d.profile?.mirror ? 'checked' : ''}> Mirror view</label></div><p class="note" id="drawHint" style="margin-top:12px">${active ? 'Drag on the grid to draw the selected area.' : 'Add your first zone or select an obstacle tool to draw.'}</p><div class="savebar">${button('saveLayout', dirty ? 'Save changes' : 'Save layout', true)}${button('export', 'Export')}</div></section><aside class="sidebar"><section class="card area-panel"><div class="area-tabs" role="tablist" aria-label="Room areas"><button role="tab" id="zonesTab" aria-selected="${areaTab === 'zones'}">Zones</button><button role="tab" id="obstaclesTab" aria-selected="${areaTab === 'obstacles'}">Obstacles</button></div><div id="zonePanel" ${areaTab === 'zones' ? '' : 'hidden'}><h2>Zones <small>${layout.zones.length}/8</small></h2><div id="zones">${layout.zones.map((z) => `<div class="zone ${active === z.id ? 'selected' : ''}" data-zone="${z.id}"><div class="zone-head"><span class="swatch" style="background:${COLORS[z.id - 1]}"></span><input data-name="${z.id}" aria-label="Zone ${z.id} name" maxlength="80" value="${esc(z.name)}"><span class="badge" data-occupied="${z.id}">—</span></div><div class="zone-controls"><button data-delete="${z.id}" aria-label="Delete zone ${z.id}">×</button></div></div>`).join('')}</div>${layout.zones.length < 8 ? `<button class="new-zone" id="addZone">＋ ${layout.zones.length ? 'Add zone' : 'Create your first zone'}</button>` : ''}<p class="note">Zones and obstacles are transferred and verified when you save.</p></div><div id="obstaclePanel" ${areaTab === 'obstacles' ? '' : 'hidden'}><h2>Adjust detection</h2><p class="note">Choose a purpose, then draw its area on the room plan.</p><div class="segment">${Object.entries(REGIONS).map(([k, v]) => `<button data-region="${k}" aria-pressed="${active === k}"><strong>${v}</strong><small>${{monitoring: 'Space the sensor should ignore', interference: 'Moving objects such as fans or curtains', entry_exit: 'Doorways and room transitions'}[k]}</small></button>`).join('')}</div>${button('clearArea', 'Clear selected area')}<p class="note" style="margin-top:12px">Use Draw, Rectangle or Erase on the map. Save transfers every area together.</p></div></section><section class="card"><h2>Sensor storage</h2><p>Occupancy is evaluated by the FP400. Live positions are requested only while viewing this room.</p><p class="note">Sensor protocol support is experimental. Saving requires matching readback; test occupancy after saving.</p></section></aside></div>`;
+    return `<a class="back" href="#/">← All sensors</a><div class="pagehead"><div><div class="eyebrow">Room overview</div><h1>${esc(displayName(d))}</h1><p id="roomPresence">Waiting for sensor data</p></div><div class="actions">${button('rename', 'Rename')}${button('setupAgain', 'Run setup')}</div></div>${!d.ready ? prerequisites() : ''}<div class="editor"><section class="card map-card"><div class="map-header"><strong>Room plan</strong><span class="badge" id="liveBadge">Live view</span></div><div class="tools">${Object.entries(TOOLS).map(([t, label]) => `<button data-tool="${t}" aria-pressed="${tool === t}">${label}</button>`).join('')}${button('undo', 'Undo')}${button('fit', fullGrid ? 'Fit room' : 'Show full grid')}<select id="activeZone" aria-label="Selected drawing area"><option value="">Choose an area</option>${layout.zones.map((z) => `<option value="${z.id}">${esc(z.name)}</option>`).join('')}${Object.entries(REGIONS).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></div><div class="map-wrap"><canvas id="map" aria-label="Draw zones and obstacles on the room grid"></canvas></div><div class="map-legend"><span id="mapScale">50 cm cells</span><label><input id="mirror" type="checkbox" ${d.profile?.mirror ? 'checked' : ''}> Mirror view</label></div><p class="note" id="drawHint" style="margin-top:12px">${active ? 'Drag on the grid to draw the selected area.' : 'Add your first zone or select an obstacle tool to draw.'}</p><div class="savebar">${button('saveLayout', dirty ? 'Save changes' : 'Save layout', true)}${button('export', 'Export')}</div></section><aside class="sidebar"><section class="card area-panel"><div class="area-tabs" role="tablist" aria-label="Room areas"><button role="tab" id="zonesTab" aria-selected="${areaTab === 'zones'}">Zones</button><button role="tab" id="obstaclesTab" aria-selected="${areaTab === 'obstacles'}">Obstacles</button></div><div id="zonePanel" ${areaTab === 'zones' ? '' : 'hidden'}><h2>Zones <small>${layout.zones.length}/8</small></h2><div id="zones">${layout.zones.map((z) => `<div class="zone ${active === z.id ? 'selected' : ''}" data-zone="${z.id}"><div class="zone-head"><span class="swatch" style="background:${COLORS[z.id - 1]}"></span><input data-name="${z.id}" aria-label="Zone ${z.id} name" maxlength="80" value="${esc(z.name)}"><span class="badge" data-occupied="${z.id}">—</span></div><div class="zone-controls"><button data-delete="${z.id}" aria-label="Delete zone ${z.id}">×</button></div></div>`).join('')}</div>${layout.zones.length < 8 ? `<button class="new-zone" id="addZone">＋ ${layout.zones.length ? 'Add zone' : 'Create your first zone'}</button>` : ''}<p class="note">Zones and obstacles are transferred and verified when you save.</p></div><div id="obstaclePanel" ${areaTab === 'obstacles' ? '' : 'hidden'}><h2>Adjust detection</h2><p class="note">Choose a purpose, then draw its area on the room plan.</p><div class="segment">${Object.entries(REGIONS).map(([k, v]) => `<button data-region="${k}" aria-pressed="${active === k}"><strong>${v}</strong><small>${{monitoring: 'Space the sensor should ignore', interference: 'Moving objects such as fans or curtains', entry_exit: 'Doorways and room transitions'}[k]}</small></button>`).join('')}</div>${button('clearArea', 'Clear selected area')}<p class="note" style="margin-top:12px">Use Draw, Rectangle, Erase or Erase rectangle on the map. Save transfers every area together.</p></div></section><section class="card"><h2>Sensor storage</h2><p>Occupancy is evaluated by the FP400. Live positions are requested only while viewing this room.</p><p class="note">Sensor protocol support is experimental. Saving requires matching readback; test occupancy after saving.</p></section></aside></div>`;
 }
 function settings() {
     const debug = store.get('debug', false);
-    return `<div class="settings"><a class="back" href="#/">← All sensors</a><h1>Settings</h1><p>Appearance and diagnostics for all your rooms.</p><section class="card"><h2>Appearance</h2><label class="field">Theme<select id="theme"><option value="auto">Home Assistant / system</option><option value="light">Light</option><option value="dark">Dark</option></select></label><p class="note">Automatic follows Home Assistant when its theme is accessible; otherwise it follows your device.</p></section><section class="card"><h2>Diagnostics</h2><label class="debug-toggle"><input id="debug" type="checkbox" ${debug ? 'checked' : ''}> Show technical details and logs</label><div id="debugPanel" ${debug ? '' : 'hidden'}><p style="margin-top:16px">App ${esc(snap.version)} · Converter ${esc(snap.converterVersion)}</p>${prerequisites()}<div class="actions">${snap.devices.map((d) => `<button data-configure="${esc(d.ieee)}">Reconfigure ${esc(displayName(d))}</button>`).join('')}</div><pre class="logs" id="logs"></pre><p class="note">Detailed operation logs are also available on the Home Assistant app’s Log tab. Remove personal details before sharing diagnostics.</p></div></section><section class="card"><h2>Local drafts</h2><p>Unsaved zone edits are kept separately for each sensor in this browser.</p>${button('clearDrafts', 'Clear browser drafts')}</section></div>`;
+    return `<div class="settings"><a class="back" href="#/">← All sensors</a><h1>Settings</h1><p>Appearance and diagnostics for all your rooms.</p><section class="card"><h2>Appearance</h2><label class="field">Theme<select id="theme"><option value="auto">Home Assistant / system</option><option value="light">Light</option><option value="dark">Dark</option></select></label><p class="note">Automatic follows Home Assistant when its theme is accessible; otherwise it follows your device.</p></section><section class="card"><h2>Diagnostics</h2><label class="debug-toggle"><input id="debug" type="checkbox" ${debug ? 'checked' : ''}> Show technical details and logs</label><div id="debugPanel" ${debug ? '' : 'hidden'}><p style="margin-top:16px">App ${esc(snap.version)}${snap.build ? ` (${esc(snap.build)})` : ''} · Converter ${esc(snap.converterVersion)}</p>${prerequisites()}<div class="actions">${snap.devices.map((d) => `<button data-configure="${esc(d.ieee)}">Reconfigure ${esc(displayName(d))}</button>`).join('')}</div><pre class="logs" id="logs"></pre><p class="note">Detailed operation logs are also available on the Home Assistant app’s Log tab. Remove personal details before sharing diagnostics.</p></div></section><section class="card"><h2>Local drafts</h2><p>Unsaved zone edits are kept separately for each sensor in this browser.</p>${button('clearDrafts', 'Clear browser drafts')}</section></div>`;
 }
 
 function bind() {
@@ -187,13 +223,14 @@ function bind() {
     if (view === 'setup') {
         document.querySelectorAll('[data-mount]').forEach((b) => { b.onclick = () => { mounting.mode = b.dataset.mount; render(); }; });
         if ($('side')) { $('side').value = mounting.side; $('side').onchange = (e) => { mounting.side = e.target.value; }; }
-        const height = (mm) => { mounting.height = Math.max(100, Math.min(5000, Math.round(mm) || 2000)); $('heightGraphic').innerHTML = heightPicture(); $('heightRange').value = mounting.height; $('heightNumber').value = mounting.height / 1000; };
+        const height = (mm) => { mounting.height = Math.max(100, Math.min(5000, Math.round(mm) || 2000)); $('heightGraphic').innerHTML = heightPicture(); $('heightRange').value = mounting.height; $('heightNumber').value = mounting.height / 1000; $('heightHint').innerHTML = heightHint(); };
         if ($('heightRange')) $('heightRange').oninput = (e) => height(Number(e.target.value));
         if ($('heightNumber')) $('heightNumber').onchange = (e) => height(Number(e.target.value) * 1000);
         action('previous', () => { if (step) { step--; watch(); render(); } else location.hash = '#/'; });
         action('next', async () => {
             if (step === 0) await call('profile', {ieee: current, name: $('roomName').value});
             if (step === 1) {
+                if (unusualHeight() && !confirm(`Is ${(mounting.height / 1000).toFixed(2)} m really the height from the floor to the sensor? Ceilings in homes are rarely higher than ${UNUSUAL_CEILING_MM / 1000} m.`)) return;
                 await call('mounting', {ieee: current, ...mounting});
             }
             step++; if (step === 3) { trace = []; pass = 1; traceStart = 0; }
@@ -203,9 +240,9 @@ function bind() {
         action('cancelLearn', () => call('cancelLearn', {ieee: current}));
         action('resetTrace', () => { trace = []; pass = 1; traceStart = 0; render(); });
         action('lap', async () => {
-            if (trace.length - traceStart < 10 || envelope(trace.slice(traceStart)).length < 3) throw new Error('Walk around more of the room before confirming this lap.');
+            if (trace.length - traceStart < 10 || envelope(trace.slice(traceStart), grid()).length < 3) throw new Error('Walk around more of the room before confirming this lap.');
             if (pass === 1) { pass = 2; traceStart = trace.length; render(); return; }
-            device().profile = await call('profile', {ieee: current, room: {outline: envelope(trace)}, complete: true});
+            device().profile = await call('profile', {ieee: current, room: {outline: envelope(trace, grid())}, complete: true});
             view = 'editor'; location.hash = `#/device/${encodeURIComponent(current)}`; render(); watch();
         });
     }
@@ -219,13 +256,12 @@ function bind() {
         action('addZone', () => { undo.push(structuredClone(layout)); const z = addZone(layout); if (z) active = z.id; changed(); render(); $('map').scrollIntoView({block: 'center', behavior: 'smooth'}); });
         document.querySelectorAll('[data-zone]').forEach((el) => { el.onclick = (e) => { if (e.target.matches('input,button')) return; active = Number(el.dataset.zone); render(); }; });
         document.querySelectorAll('[data-name]').forEach((el) => { el.oninput = () => { layout.zones.find((z) => z.id === Number(el.dataset.name)).name = el.value; changed(); }; });
-        document.querySelectorAll('[data-delay]').forEach((el) => { el.onchange = () => { layout.zones.find((z) => z.id === Number(el.dataset.delay)).delay = Math.max(0, Math.min(600, Number(el.value) || 0)); changed(); }; });
         document.querySelectorAll('[data-delete]').forEach((el) => { el.onclick = () => { if (!confirm('Delete this zone from the draft? Save to apply the change.')) return; undo.push(structuredClone(layout)); layout.zones = layout.zones.filter((z) => z.id !== Number(el.dataset.delete)); active = layout.zones[0]?.id ?? null; changed(); render(); }; });
         document.querySelectorAll('[data-region]').forEach((el) => { el.onclick = () => { active = el.dataset.region; render(); }; });
         document.querySelectorAll('[data-tool]').forEach((el) => { el.onclick = () => { tool = el.dataset.tool; render(); }; });
         action('undo', () => { if (undo.length) { layout = undo.pop(); changed(); render(); } });
         action('clearArea', () => { if (active === null) return; undo.push(structuredClone(layout)); setMask(emptyMask()); changed(); });
-        action('fit', () => { fullGrid = !fullGrid; draw(); });
+        action('fit', () => { fullGrid = !fullGrid; $('fit').textContent = fullGrid ? 'Fit room' : 'Show full grid'; draw(); });
         $('mirror').onchange = async (e) => { try { await call('profile', {ieee: current, mirror: e.target.checked}); } catch (err) { toast(err.message); } };
         action('saveLayout', saveLayout);
         action('export', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(layout, null, 2)], {type: 'application/json'})); a.download = 'fp400-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); });
@@ -261,12 +297,14 @@ function refreshLive() {
         $('learnStatus').textContent = left !== null ? 'Leave the room now' : job?.status === 'learning' ? 'Learning… stay outside until confirmation' : job?.status === 'complete' ? 'Confirmed by the sensor. You can enter the room.' : 'Ready when you are';
         $('learnProgress').style.width = `${job?.status === 'complete' ? 100 : Math.min(99, elapsed / 120 * 100)}%`;
     }
-    if ($('roomSize')) { const b = bounds(envelope(trace)); $('roomSize').textContent = `Estimated extent: ${((b.maxX - b.minX) / 100).toFixed(1)} × ${((b.maxY - b.minY) / 100).toFixed(1)} m · ${trace.length} samples`; }
+    if ($('roomSize')) { const b = bounds(envelope(trace, grid()), grid()); $('roomSize').textContent = `Estimated extent: ${((b.maxX - b.minX) / 100).toFixed(1)} × ${((b.maxY - b.minY) / 100).toFixed(1)} m · ${trace.length} samples`; }
     draw();
 }
 setInterval(refreshLive, 1000);
 
 let fullGrid = false;
+const isRect = () => tool === 'rect' || tool === 'rectErase';
+const isErase = () => tool === 'erase' || tool === 'rectErase';
 function selectedMask() { return typeof active === 'number' ? layout.zones.find((z) => z.id === active)?.cells : layout.regions[active]; }
 function setMask(hex) { if (typeof active === 'number') { const z = layout.zones.find((z) => z.id === active); if (z) z.cells = hex; } else if (active in REGIONS) layout.regions[active] = hex; }
 function draw() {
@@ -276,8 +314,9 @@ function draw() {
     cv.width = width * dpr; cv.height = height * dpr;
     const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr);
     const style = getComputedStyle(document.documentElement), color = (k) => style.getPropertyValue(k).trim();
-    const outline = view === 'setup' ? envelope(trace) : device().profile?.room?.outline;
-    const b = bounds(view === 'setup' || fullGrid ? null : outline);
+    const mode = grid();
+    const outline = view === 'setup' ? envelope(trace, mode) : device().profile?.room?.outline;
+    const b = bounds(view === 'setup' || fullGrid ? null : [...(outline || []), ...(view === 'editor' ? drawnCorners(mode) : [])], mode);
     const scale = Math.min((width - 36) / (b.maxX - b.minX), (height - 36) / (b.maxY - b.minY));
     const ox = (width - (b.maxX - b.minX) * scale) / 2, oy = (height - (b.maxY - b.minY) * scale) / 2;
     const mirror = !!device().profile?.mirror;
@@ -289,7 +328,7 @@ function draw() {
     const fill = (mask, c, hatch = false) => {
         for (let bit = 0; bit < 320; bit++) {
             if (!maskHas(mask, bit)) continue;
-            const col = bit % 16, row = Math.floor(bit / 16), x = (7 - col) * 50, y = row * 50;
+            const {x, y} = cellOrigin(bit, mode);
             if (x < b.minX || x >= b.maxX || y < b.minY || y >= b.maxY) continue;
             const a = xy(x, y + 50), z = xy(x + 50, y);
             ctx.globalAlpha = .27; ctx.fillStyle = c; ctx.fillRect(Math.min(a[0], z[0]), a[1], 50 * scale, 50 * scale);
@@ -308,8 +347,30 @@ function draw() {
         ctx.fillStyle = color('--accent'); ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = color('--card'); ctx.lineWidth = 3; ctx.stroke();
     }
+    if (view === 'editor' && painting && isRect()) {
+        const {rows, cols} = rectSpan(painting.start, painting.last);
+        const low = cellOrigin(rows[0] * 16 + cols[1], mode), high = cellOrigin(rows[1] * 16 + cols[0], mode);
+        const a = xy(low.x, high.y + 50), z = xy(high.x + 50, low.y);
+        ctx.strokeStyle = tool === 'rectErase' ? color('--danger') : color('--accent'); ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+        ctx.strokeRect(Math.min(a[0], z[0]), Math.min(a[1], z[1]), Math.abs(z[0] - a[0]), Math.abs(z[1] - a[1])); ctx.setLineDash([]);
+    }
     const [sx, sy] = xy(0, 0); if (sy <= height && sy >= 0) { ctx.fillStyle = color('--primary'); ctx.fillRect(sx - 10, sy - 5, 20, 10); }
-    if ($('mapScale')) $('mapScale').textContent = `${((b.maxX - b.minX) / 100).toFixed(1)} × ${((b.maxY - b.minY) / 100).toFixed(1)} m · 50 cm cells`;
+    if ($('mapScale')) $('mapScale').textContent = `${((b.maxX - b.minX) / 100).toFixed(1)} × ${((b.maxY - b.minY) / 100).toFixed(1)} m · 50 cm cells${mode === 'ceiling' ? ' · ceiling mount' : ''}`;
+}
+// Corners of every drawn zone and obstacle cell, so a fitted view never cuts off saved areas.
+function drawnCorners(mode) {
+    const points = [];
+    for (const mask of [...layout.zones.map((z) => z.cells), ...Object.values(layout.regions)]) {
+        for (let bit = 0; bit < 320; bit++) {
+            if (!maskHas(mask, bit)) continue;
+            const {x, y} = cellOrigin(bit, mode);
+            points.push({x, y}, {x: x + 50, y: y + 50});
+        }
+    }
+    return points;
+}
+function rectSpan(a, b) {
+    return {rows: [Math.min(a >> 4, b >> 4), Math.max(a >> 4, b >> 4)], cols: [Math.min(a % 16, b % 16), Math.max(a % 16, b % 16)]};
 }
 function bindCanvas() {
     const cv = $('map');
@@ -318,24 +379,27 @@ function bindCanvas() {
         const r = cv.getBoundingClientRect(), t = transform;
         const x = t.mirror ? t.b.maxX - (e.clientX - r.left - t.ox) / t.scale : t.b.minX + (e.clientX - r.left - t.ox) / t.scale;
         const y = t.b.minY + (t.height - t.oy - (e.clientY - r.top)) / t.scale;
-        return cellAt(x, y);
+        return cellAt(x, y, grid());
     };
-    const apply = (bit) => { if (bit === null || !selectedMask()) return; setMask(maskSet(selectedMask(), bit, tool !== 'erase')); changed(); };
+    const apply = (bit, commit = true) => { if (bit === null || !selectedMask()) return; setMask(maskSet(selectedMask(), bit, !isErase())); if (commit) changed(); };
     cv.onpointerdown = (e) => {
         if (view !== 'editor' || active === null) return;
         const bit = bitFor(e); if (bit === null) return;
         cv.setPointerCapture(e.pointerId); undo.push(structuredClone(layout)); if (undo.length > 40) undo.shift();
-        painting = {start: bit, last: bit}; if (tool !== 'rect') apply(bit);
+        painting = {start: bit, last: bit}; if (!isRect()) apply(bit); else draw();
     };
-    cv.onpointermove = (e) => { if (!painting) return; const bit = bitFor(e); if (bit === null) return; painting.last = bit; if (tool !== 'rect') apply(bit); };
+    cv.onpointermove = (e) => { if (!painting) return; const bit = bitFor(e); if (bit === null || bit === painting.last) return; painting.last = bit; if (!isRect()) apply(bit); else draw(); };
     cv.onpointerup = () => {
-        if (painting && tool === 'rect') {
-            const a = painting.start, b = painting.last;
-            for (let row = Math.min(a >> 4, b >> 4); row <= Math.max(a >> 4, b >> 4); row++) for (let col = Math.min(a % 16, b % 16); col <= Math.max(a % 16, b % 16); col++) apply(row * 16 + col);
+        if (painting && isRect()) {
+            const {rows, cols} = rectSpan(painting.start, painting.last);
+            for (let row = rows[0]; row <= rows[1]; row++) for (let col = cols[0]; col <= cols[1]; col++) apply(row * 16 + col, false);
+            painting = null;
+            changed();
+            return;
         }
         painting = null;
     };
-    cv.onpointercancel = () => { painting = null; };
+    cv.onpointercancel = () => { painting = null; draw(); };
     cv.oncontextmenu = (e) => e.preventDefault();
 }
 window.addEventListener('resize', draw);
