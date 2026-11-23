@@ -10,6 +10,10 @@
 - Removed the unused raw `set`/`get` WebSocket actions, which allowed arbitrary MQTT payloads to be published to a sensor.
 - Web UI responses send `X-Content-Type-Options`, `Referrer-Policy` and a Content Security Policy.
 - New zones default to a 0-second delay, matching the value written to the sensor on save. Removed unused delay handling.
+- New **Erase rectangle** tool clears a rectangular part of the selected zone or obstacle area in one drag, with a red live outline.
+- Rectangle tool shows a live outline while dragging and commits the area as a single change instead of one draft write per cell.
+- The fitted room view always includes every drawn zone and obstacle, so saved areas outside an older or incomplete room outline are no longer cut off. The view toggle is labelled **Show full grid** / **Fit room** according to what it does.
+- After an app update, open pages and the Home Assistant companion app no longer keep running cached old scripts. Script and style URLs carry a content hash, the start page is never cached, and an open page reloads itself when the server reports a newer build (with unsaved zone edits it asks you to save or export first). Settings > Diagnostics shows the build.
 
 ## 1.2.5
 

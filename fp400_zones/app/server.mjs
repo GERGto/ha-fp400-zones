@@ -155,6 +155,7 @@ function snapshot() {
         converterVersion: CONVERTER_VERSION,
         autoSetup: AUTO_SETUP,
         version: APP_VERSION,
+        build: BUILD,
         settings: persisted.settings,
         connections: {mqtt: S.mqtt.status, z2m: S.bridge.state},
         permitJoinUntil: S.permitJoinUntil,
@@ -611,6 +612,17 @@ const SECURITY_HEADERS = {
     'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; form-action 'none'",
 };
 
+// Asset URLs carry a content hash so a browser (or the ingress iframe after a reload of Home Assistant only)
+// can never combine a cached old script with a newer server.
+const PUBLIC = path.join(HERE, 'public');
+const BUILD = crypto.createHash('sha256')
+    .update(['index.html', 'app.js', 'model.js', 'style.css'].map((f) => fs.readFileSync(path.join(PUBLIC, f), 'utf8')).join('\0'))
+    .digest('hex').slice(0, 12);
+const versioned = {
+    'index.html': (text) => text.replace('src="app.js"', `src="app.js?v=${BUILD}"`).replace('href="style.css"', `href="style.css?v=${BUILD}"`),
+    'app.js': (text) => text.replace("from './model.js'", `from './model.js?v=${BUILD}'`),
+};
+
 const STATIC = {
     '/': ['index.html', 'text/html; charset=utf-8'],
     '/index.html': ['index.html', 'text/html; charset=utf-8'],
@@ -641,13 +653,14 @@ const server = http.createServer((req, res) => {
         res.writeHead(404).end('Not found');
         return;
     }
-    const file = path.join(HERE, 'public', entry[0]);
+    const file = path.join(PUBLIC, entry[0]);
     fs.readFile(file, (err, data) => {
         if (err) {
             res.writeHead(404).end('Not found');
             return;
         }
-        res.writeHead(200, {'content-type': entry[1], 'cache-control': 'no-cache'}).end(data);
+        const body = versioned[entry[0]] ? versioned[entry[0]](data.toString('utf8')) : data;
+        res.writeHead(200, {'content-type': entry[1], 'cache-control': entry[0] === 'index.html' ? 'no-store' : 'no-cache'}).end(body);
     });
 });
 
