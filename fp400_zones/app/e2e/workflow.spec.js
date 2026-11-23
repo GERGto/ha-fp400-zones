@@ -271,9 +271,10 @@ test('the room view rotates in 90 degree steps and drawing follows the rotation'
     await expect.poll(() => m.requests.filter((r) => r.op === 'profile').at(-1)?.rotation).toBe(90);
     // Turned a quarter, the 8 m wide wall grid is now 10 m wide on screen.
     await expect(page.locator('#mapScale')).toContainText('10.0 × 8.0 m');
-    await page.locator('#map').scrollIntoViewIfNeeded();
-    const box = await page.locator('#map').boundingBox();
     await page.getByRole('button', {name: 'Rectangle', exact: true}).click();
+    // Centre the map: on narrow screens the sticky header and toolbar cover its top edge.
+    await page.locator('#map').evaluate((el) => el.scrollIntoView({block: 'center'}));
+    const box = await page.locator('#map').boundingBox();
     // Right edge of the turned view = far end of the wall grid (high rows).
     await page.mouse.move(box.x + box.width * 0.88, box.y + box.height * 0.45); await page.mouse.down();
     await page.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.55, {steps: 3}); await page.mouse.up();
