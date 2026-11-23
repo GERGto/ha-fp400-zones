@@ -527,7 +527,7 @@ const fzConfigAttr = {
 
 const tzFp400 = {
     key: ['install_mode', 'side_install', 'install_height', 'region_monitoring', 'region_interference', 'region_entry_exit',
-        'background_learning', 'location_subscribe', 'native_zones', 'sensor_layout'],
+        'background_learning', 'location_subscribe', 'native_zones', 'sensor_layout', 'mounting'],
     convertSet: async (entity, key, value, meta) => {
         const ep = meta.device.getEndpoint(1);
         switch (key) {
@@ -553,6 +553,31 @@ const tzFp400 = {
                 const mask = hexToMask(value);
                 await writeVerify(ep, REGIONS[key], T.OCTET, mask);
                 return {state: {[key]: mask.toString('hex')}};
+            }
+            case 'mounting': {
+                // Correlated mounting write for FP400 Zones: every value is read back, and the result carries the
+                // request ID so a state that already matched can never count as confirmation.
+                const request = value?.request;
+                if (typeof request !== 'string' || !request || request.length > 80) throw new Error('Invalid mounting request');
+                try {
+                    if (!Object.hasOwn(INSTALL_MODES, value.mode)) throw new Error(`install_mode must be one of ${Object.keys(INSTALL_MODES).join(', ')}`);
+                    if (value.mode === 'wall' && !Object.hasOwn(SIDE_INSTALLS, value.side)) throw new Error(`side_install must be one of ${Object.keys(SIDE_INSTALLS).join(', ')}`);
+                    const height = Number(value.height);
+                    if (!Number.isInteger(height) || height < 100 || height > 5000) throw new Error('install_height must be 100..5000 mm');
+                    const state = {};
+                    // Mode first: changing it can reset the height on the sensor, so the height is written last.
+                    await writeVerify(ep, 'installMode', T.ENUM8, INSTALL_MODES[value.mode]);
+                    state.install_mode = value.mode;
+                    if (value.mode === 'wall') {
+                        await writeVerify(ep, 'sideInstall', T.ENUM8, SIDE_INSTALLS[value.side]);
+                        state.side_install = value.side;
+                    }
+                    await writeVerify(ep, 'installHeight', T.U16, height);
+                    state.install_height = height;
+                    return {state: {...state, mounting_request: request, mounting_status: 'verified', mounting_error: null}};
+                } catch (err) {
+                    return {state: {mounting_request: request, mounting_status: 'failed', mounting_error: err.message}};
+                }
             }
             case 'background_learning': {
                 await ep.command(CL_CONFIG, 'learn', {}, MO);
