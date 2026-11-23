@@ -33,6 +33,7 @@ const OUR_MODEL = 'PS-S05D';
 const CONVERTER_NAME = 'aqara-fp400-zones.mjs';
 const CONVERTER_CODE = fs.readFileSync(path.join(HERE, 'converter', CONVERTER_NAME), 'utf8');
 const CONVERTER_VERSION = /CONVERTER_VERSION = '([^']+)'/.exec(CONVERTER_CODE)?.[1] ?? 'dev';
+const APP_VERSION = readJson(path.join(HERE, 'package.json'))?.version ?? 'dev';
 const RETRY_MS = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -57,7 +58,7 @@ function persist() {
         fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify(persisted, null, 1));
         fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
     } catch (err) {
-        log('warn', `Could not ${STATE_FILE} write: ${err.message}`);
+        log('warn', `Could not write ${STATE_FILE}: ${err.message}`);
     }
 }
 
@@ -146,18 +147,19 @@ function setupSteps() {
 }
 
 function snapshot() {
+    const steps = setupSteps();
     return {
         type: 'snapshot',
         addon: ADDON,
         baseTopic: BASE,
         converterVersion: CONVERTER_VERSION,
         autoSetup: AUTO_SETUP,
-        version: '1.2.2',
+        version: APP_VERSION,
         settings: persisted.settings,
         connections: {mqtt: S.mqtt.status, z2m: S.bridge.state},
         permitJoinUntil: S.permitJoinUntil,
-        steps: setupSteps(),
-        ready: setupSteps().every((s) => s.status === 'ok' || s.status === 'wait' && s.id.startsWith('dev:')),
+        steps,
+        ready: steps.every((s) => s.status === 'ok' || s.status === 'wait' && s.id.startsWith('dev:')),
         devices: S.devices.map((d) => ({
             ieee: d.ieee_address,
             name: d.friendly_name,
@@ -397,7 +399,7 @@ const actions = {
     async watch({ieee}, owner) {
         if (ieee) requireDevice(ieee);
         workflow.watch(owner, ieee);
-        workflow.tick(S.devices.filter(deviceUsesOurDefinition).map((d) => d.ieee_address), (id) => layoutFor(id).layout);
+        tickWorkflow();
     },
     async profile({ieee, name, room, complete, mirror}) {
         const device = requireDevice(ieee);
@@ -525,16 +527,6 @@ const actions = {
             scheduleBroadcast();
         });
     },
-    async set({ieee, payload}) {
-        const d = S.devices.find((x) => x.ieee_address === ieee);
-        if (!d) throw new Error('Device not found');
-        publish(`${BASE}/${d.friendly_name}/set`, payload);
-    },
-    async get({ieee, payload}) {
-        const d = S.devices.find((x) => x.ieee_address === ieee);
-        if (!d) throw new Error('Device not found');
-        publish(`${BASE}/${d.friendly_name}/get`, payload);
-    },
 };
 
 function requireDevice(ieee) {
@@ -548,7 +540,10 @@ const workflow = new Workflow({profiles: persisted.profiles, save: persist, chan
         if (!deviceUsesOurDefinition(d)) throw new Error('FP400 converter is not active');
         publish(`${BASE}/${d.friendly_name}/set`, payload);
     }});
-setInterval(() => workflow.tick(S.devices.filter(deviceUsesOurDefinition).map((d) => d.ieee_address), (id) => layoutFor(id).layout), 1000);
+function tickWorkflow() {
+    workflow.tick(S.devices.filter(deviceUsesOurDefinition).map((d) => d.ieee_address));
+}
+setInterval(tickWorkflow, 1000);
 
 // Automatic setup: install / update the converter and configure the sensor without user interaction.
 let autoTimer = null;
@@ -609,6 +604,13 @@ function allowed(req) {
     return ip === '172.30.32.2';
 }
 
+// The ingress panel embeds this page in Home Assistant, so framing is intentionally not restricted here.
+const SECURITY_HEADERS = {
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; form-action 'none'",
+};
+
 const STATIC = {
     '/': ['index.html', 'text/html; charset=utf-8'],
     '/index.html': ['index.html', 'text/html; charset=utf-8'],
@@ -619,6 +621,7 @@ const STATIC = {
 };
 
 const server = http.createServer((req, res) => {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     if (!allowed(req)) {
         res.writeHead(403).end('Forbidden');
         return;
@@ -693,7 +696,7 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-    log('info', `FP400 Zones 1.2.2 (converter ${CONVERTER_VERSION}) listening on port ${server.address().port} (${ADDON ? 'Home Assistant app' : 'Standalone'})`);
+    log('info', `FP400 Zones ${APP_VERSION} (converter ${CONVERTER_VERSION}) listening on port ${server.address().port} (${ADDON ? 'Home Assistant app' : 'Standalone'})`);
     connectMqtt();
 });
 

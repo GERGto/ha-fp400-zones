@@ -6,6 +6,10 @@
 - Device reconfiguration no longer resets an existing mounting setup. A ceiling-mounted sensor reported mounting mode 0 during reconfiguration, and the converter then wrote wall mounting, which also cleared the height. Default mounting is now only written to a sensor without a stored mounting height.
 - New converter key `mounting` ({request, mode, side, height}) writes and reads back the mounting type, wall position and height and answers with the request ID, so a caller can confirm exactly its own write.
 - Converter version 1.3.5. Zigbee2MQTT reconfigures the sensor once after the update; existing mounting settings are kept.
+- Diagnostics and the startup log report the actual app version instead of a hard-coded 1.2.2.
+- Removed the unused raw `set`/`get` WebSocket actions, which allowed arbitrary MQTT payloads to be published to a sensor.
+- Web UI responses send `X-Content-Type-Options`, `Referrer-Policy` and a Content Security Policy.
+- New zones default to a 0-second delay, matching the value written to the sensor on save. Removed unused delay handling.
 
 ## 1.2.5
 

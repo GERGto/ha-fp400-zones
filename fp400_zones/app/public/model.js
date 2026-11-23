@@ -27,7 +27,8 @@ export function cellAt(x, y) {
 export function addZone(layout) {
     const id = Array.from({length: 8}, (_, i) => i + 1).find((i) => !layout.zones.some((z) => z.id === i));
     if (!id) return null;
-    const zone = {id, name: `Zone ${id}`, enabled: true, delay: 5, cells: emptyMask()};
+    // The sensor's absence confirmation is always written as 0 seconds when saving.
+    const zone = {id, name: `Zone ${id}`, enabled: true, delay: 0, cells: emptyMask()};
     layout.zones.push(zone); return zone;
 }
 export function envelope(points) {
