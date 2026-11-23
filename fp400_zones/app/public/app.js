@@ -219,7 +219,6 @@ function bind() {
         action('addZone', () => { undo.push(structuredClone(layout)); const z = addZone(layout); if (z) active = z.id; changed(); render(); $('map').scrollIntoView({block: 'center', behavior: 'smooth'}); });
         document.querySelectorAll('[data-zone]').forEach((el) => { el.onclick = (e) => { if (e.target.matches('input,button')) return; active = Number(el.dataset.zone); render(); }; });
         document.querySelectorAll('[data-name]').forEach((el) => { el.oninput = () => { layout.zones.find((z) => z.id === Number(el.dataset.name)).name = el.value; changed(); }; });
-        document.querySelectorAll('[data-delay]').forEach((el) => { el.onchange = () => { layout.zones.find((z) => z.id === Number(el.dataset.delay)).delay = Math.max(0, Math.min(600, Number(el.value) || 0)); changed(); }; });
         document.querySelectorAll('[data-delete]').forEach((el) => { el.onclick = () => { if (!confirm('Delete this zone from the draft? Save to apply the change.')) return; undo.push(structuredClone(layout)); layout.zones = layout.zones.filter((z) => z.id !== Number(el.dataset.delete)); active = layout.zones[0]?.id ?? null; changed(); render(); }; });
         document.querySelectorAll('[data-region]').forEach((el) => { el.onclick = () => { active = el.dataset.region; render(); }; });
         document.querySelectorAll('[data-tool]').forEach((el) => { el.onclick = () => { tool = el.dataset.tool; render(); }; });
