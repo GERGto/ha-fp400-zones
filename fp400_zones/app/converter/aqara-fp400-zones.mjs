@@ -7,8 +7,10 @@
  *     (stored as the device option `fp400_layout`, i.e. in configuration.yaml – no Aqara hub, no cloud)
  *   - mounting mode / side / height, region masks (monitoring exclusion, interference, entry/exit),
  *     AI background learning
- *   - EXPERIMENTAL: write the zones natively to the sensor (appendZone/removeZone, 0xFC0A cmd 0x04/0x08)
- *     and verify by reading attribute 0x0010 back.
+ *   - EXPERIMENTAL: write the zones natively to the sensor (appendZone/removeZone, 0xFC0A cmd 0x04/0x08).
+ *     Every command is confirmed by its response (0x05/0x09, status byte). The zone table (attribute 0x0010)
+ *     is compared as well when it can be read: with two or more zones the sensor sends it APS-fragmented,
+ *     which some coordinator adapters (e.g. ember) do not reassemble.
  *
  * Protocol references (community research, not official Aqara documentation):
  *   - Koenkk/zigbee2mqtt#33146 (Zigbee frame captures, attribute discovery)
@@ -24,7 +26,7 @@ import {logger} from 'zigbee-herdsman-converters/lib/logger';
 const e = exposes.presets;
 const ea = exposes.access;
 
-const CONVERTER_VERSION = '1.3.4';
+const CONVERTER_VERSION = '1.3.5';
 const MFR = 0x115f;
 const MO = {manufacturerCode: MFR};
 const GRID_COLS = 16;
@@ -74,10 +76,14 @@ const clusterConfig = {
     }),
     commands: cmdDefs({
         learn: {ID: 0x03, parameters: []},
-        appendZonePlain: {ID: 0x04, parameters: byteParams(50)},
-        removeZonePlain: {ID: 0x08, parameters: byteParams(1)},
+        appendZonePlain: {ID: 0x04, parameters: byteParams(50), response: 0x05},
+        removeZonePlain: {ID: 0x08, parameters: byteParams(1), response: 0x09},
     }),
-    commandsResponse: {},
+    // Observed on hardware: cluster-specific response with one plain status byte (0 = success).
+    commandsResponse: cmdDefs({
+        appendZoneResponse: {ID: 0x05, parameters: [{name: 'status', type: T.U8}]},
+        removeZoneResponse: {ID: 0x09, parameters: [{name: 'status', type: T.U8}]},
+    }),
 };
 
 const clusterRadar = {
@@ -355,32 +361,50 @@ async function readNativeZones(ep) {
 
 async function nativeZones(ep, layout, action, device) {
     const errors = [];
+    // Returns the sensor's status byte, or null when the command failed or was not answered.
     const send = async (cmd, buf) => {
+        let status = null;
         try {
-            await ep.command(CL_CONFIG, cmd, toByteObject(buf), {...MO, disableDefaultResponse: true});
+            const response = await ep.command(CL_CONFIG, cmd, toByteObject(buf), {...MO, disableDefaultResponse: true});
+            status = Number.isInteger(response?.status) ? response.status : null;
+            if (status === null) errors.push(`${cmd}: no response from the sensor`);
         } catch (err) {
             errors.push(`${cmd}: ${err.message}`);
         }
         await sleep(400);
+        return status;
     };
     const wanted = action === 'clear' ? [] : layout.zones.filter((z) => z.enabled && maskCount(z.mask) > 0);
+    let acknowledged = false;
     if (action !== 'read') {
+        // Removing an ID that is not stored is acknowledged as success by the sensor.
         for (let id = 1; id <= MAX_ZONES; id++) {
-            await send('removeZonePlain', Buffer.from([id]));
+            const status = await send('removeZonePlain', Buffer.from([id]));
+            if (status !== null && status !== 0) errors.push(`remove zone ${id}: ${ZONE_STATUS[status] ?? `status ${status}`}`);
         }
-        for (const zone of wanted) await send('appendZonePlain', encodeZone(zone));
+        for (const zone of wanted) {
+            const status = await send('appendZonePlain', encodeZone(zone));
+            if (status !== null && status !== 0) errors.push(`add zone ${zone.id}: ${ZONE_STATUS[status] ?? `status ${status}`}`);
+        }
+        acknowledged = errors.length === 0;
         await sleep(1500);
     }
     const back = await readNativeZones(ep);
     let sync = 'unreadable';
+    let verification = null;
     if (Array.isArray(back)) {
         if (action === 'read') {
             sync = 'read';
         } else {
             const ok = errors.length === 0 && back.length === wanted.length && wanted.every((z) => back.some((b) => b.id === z.id && b.cells === z.mask.toString('hex') && b.enabled === z.enabled));
             sync = ok ? 'verified' : 'mismatch';
+            verification = 'readback';
             if (!ok && !errors.length) errors.push('Zone readback mismatch: requested ' + wanted.length + ', received ' + back.length + '. Sensor did not confirm identical IDs, masks and enabled flags.');
         }
+    } else if (acknowledged) {
+        // The zone table could not be read (fragmented response); every command was confirmed instead.
+        sync = 'verified';
+        verification = 'acknowledged';
     }
     if (action === 'write' && sync === 'verified') {
         // The global timeout can delay zone clearing even when each zone already uses 0 seconds.
@@ -402,7 +426,8 @@ async function nativeZones(ep, layout, action, device) {
     }
     return {native_zones: Array.isArray(back) ? back.map((z) => ({id: z.id, enabled: z.enabled, cells: z.cells})) : [],
         native_layout: sync === 'verified' ? wanted.map((z) => `${z.id}:${z.mask.toString('hex')}`).sort().join('|') : null,
-        native_sync: sync, native_errors: errors.length ? errors.slice(0, 4).join('; ') : (typeof back === 'string' ? back : null), native_encoding: 'zcl_members'};
+        native_sync: sync, native_verification: verification,
+        native_errors: errors.length ? errors.slice(0, 4).join('; ') : (typeof back === 'string' && !acknowledged ? back : null), native_encoding: 'zcl_members'};
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -502,7 +527,7 @@ const fzConfigAttr = {
 
 const tzFp400 = {
     key: ['install_mode', 'side_install', 'install_height', 'region_monitoring', 'region_interference', 'region_entry_exit',
-        'background_learning', 'location_subscribe', 'native_zones', 'sensor_layout'],
+        'background_learning', 'location_subscribe', 'native_zones', 'sensor_layout', 'mounting'],
     convertSet: async (entity, key, value, meta) => {
         const ep = meta.device.getEndpoint(1);
         switch (key) {
@@ -528,6 +553,31 @@ const tzFp400 = {
                 const mask = hexToMask(value);
                 await writeVerify(ep, REGIONS[key], T.OCTET, mask);
                 return {state: {[key]: mask.toString('hex')}};
+            }
+            case 'mounting': {
+                // Correlated mounting write for FP400 Zones: every value is read back, and the result carries the
+                // request ID so a state that already matched can never count as confirmation.
+                const request = value?.request;
+                if (typeof request !== 'string' || !request || request.length > 80) throw new Error('Invalid mounting request');
+                try {
+                    if (!Object.hasOwn(INSTALL_MODES, value.mode)) throw new Error(`install_mode must be one of ${Object.keys(INSTALL_MODES).join(', ')}`);
+                    if (value.mode === 'wall' && !Object.hasOwn(SIDE_INSTALLS, value.side)) throw new Error(`side_install must be one of ${Object.keys(SIDE_INSTALLS).join(', ')}`);
+                    const height = Number(value.height);
+                    if (!Number.isInteger(height) || height < 100 || height > 5000) throw new Error('install_height must be 100..5000 mm');
+                    const state = {};
+                    // Mode first: changing it can reset the height on the sensor, so the height is written last.
+                    await writeVerify(ep, 'installMode', T.ENUM8, INSTALL_MODES[value.mode]);
+                    state.install_mode = value.mode;
+                    if (value.mode === 'wall') {
+                        await writeVerify(ep, 'sideInstall', T.ENUM8, SIDE_INSTALLS[value.side]);
+                        state.side_install = value.side;
+                    }
+                    await writeVerify(ep, 'installHeight', T.U16, height);
+                    state.install_height = height;
+                    return {state: {...state, mounting_request: request, mounting_status: 'verified', mounting_error: null}};
+                } catch (err) {
+                    return {state: {mounting_request: request, mounting_status: 'failed', mounting_error: err.message}};
+                }
             }
             case 'background_learning': {
                 await ep.command(CL_CONFIG, 'learn', {}, MO);
@@ -622,11 +672,14 @@ const fp400Extend = {
                 }
             }
             // A sensor that was never set up in the Aqara app has no mounting configuration and does not stream
-            // positions. Writing a mounting mode enables the stream (#33146). Existing settings are left alone.
+            // positions. Writing a mounting mode enables the stream (#33146). Existing settings are left alone:
+            // a ceiling-mounted sensor was observed to report mode 0 briefly during reconfiguration, so a stored
+            // mounting height counts as an existing setup.
             try {
-                const res = await ep1.read(CL_CONFIG, ['installMode', 'sideInstall'], MO);
-                if (!readAttr(res, 'installMode')) await ep1.write(CL_CONFIG, {[ATTR.installMode]: {value: 1, type: T.ENUM8}}, MO);
-                if (!readAttr(res, 'sideInstall')) await ep1.write(CL_CONFIG, {[ATTR.sideInstall]: {value: 1, type: T.ENUM8}}, MO);
+                const res = await ep1.read(CL_CONFIG, ['installMode', 'sideInstall', 'installHeight'], MO);
+                const setUp = Number(readAttr(res, 'installHeight')) > 0;
+                if (!setUp && !readAttr(res, 'installMode')) await ep1.write(CL_CONFIG, {[ATTR.installMode]: {value: 1, type: T.ENUM8}}, MO);
+                if (!setUp && !readAttr(res, 'sideInstall')) await ep1.write(CL_CONFIG, {[ATTR.sideInstall]: {value: 1, type: T.ENUM8}}, MO);
             } catch {
                 // ignore, can be set later from the editor
             }

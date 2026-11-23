@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## Unreleased
+
+- **Saving two or more zones no longer fails.** With two or more zones the FP400 sends its zone table APS-fragmented, and Zigbee2MQTT's ember adapter only receives the first 80-byte fragment, so the readback always failed with "offset is out of range" although the zones were stored and reported occupancy. Every zone command now waits for the sensor's own response (status byte, 0 = success). When the table cannot be read, a save counts as verified only if every remove and add command was confirmed; when it can be read (0 or 1 zone, or adapters that reassemble fragments), it is still compared exactly.
+- Device reconfiguration no longer resets an existing mounting setup. A ceiling-mounted sensor reported mounting mode 0 during reconfiguration, and the converter then wrote wall mounting, which also cleared the height. Default mounting is now only written to a sensor without a stored mounting height.
+- New converter key `mounting` ({request, mode, side, height}) writes and reads back the mounting type, wall position and height and answers with the request ID, so a caller can confirm exactly its own write.
+- Converter version 1.3.5. Zigbee2MQTT reconfigures the sensor once after the update; existing mounting settings are kept.
+
 ## 1.2.5
 
 - Saving a room now sets both global presence and every transferred zone's absence confirmation time to 0 seconds. The global timeout was observed to delay zone clearing even with per-zone timeouts set to zero.
